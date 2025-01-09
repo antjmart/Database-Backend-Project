@@ -1,6 +1,6 @@
-# PeterDB
+# antjmart
 
-#### This is the project codebase for Principles of Data Management, PeterDB
+#### This is the project codebase for Principles of Data Management, antjmart
 
 
 ### Components:
