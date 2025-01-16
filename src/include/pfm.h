@@ -4,6 +4,7 @@
 #define PAGE_SIZE 4096
 
 #include <string>
+#include <fstream>
 
 namespace PeterDB {
 
@@ -31,15 +32,19 @@ namespace PeterDB {
 
     class FileHandle {
     public:
-        std::string fileName;
+        // file stream for reading and writing
+        std::fstream file;
+
         // variables to keep the counter for each operation
         unsigned readPageCounter;
         unsigned writePageCounter;
         unsigned appendPageCounter;
+        unsigned pageCount;
 
         FileHandle();                                                       // Default constructor
         ~FileHandle();                                                      // Destructor
 
+        RC initFileHandle(const std::string &fileName);                     // Pull info from file's first page
         RC readPage(PageNum pageNum, void *data);                           // Get a specific page
         RC writePage(PageNum pageNum, const void *data);                    // Write a specific page
         RC appendPage(const void *data);                                    // Append a specific page
