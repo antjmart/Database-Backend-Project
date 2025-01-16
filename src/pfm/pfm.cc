@@ -42,7 +42,17 @@ namespace PeterDB {
     FileHandle::~FileHandle() = default;
 
     RC FileHandle::readPage(PageNum pageNum, void *data) {
-        return -1;
+        // open file, return error code if file does not exist
+        std::ifstream file(fileName);
+        if (!file.is_open()) return -1;
+
+        // seek to page we want, read page into data pointer
+        file.seekg((pageNum + 1) * PAGE_SIZE, std::ios::beg);
+        file.read((char *)data, PAGE_SIZE);
+
+        // increment counter, return successfully
+        ++readPageCounter;
+        return 0;
     }
 
     RC FileHandle::writePage(PageNum pageNum, const void *data) {
