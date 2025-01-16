@@ -56,7 +56,17 @@ namespace PeterDB {
     }
 
     RC FileHandle::writePage(PageNum pageNum, const void *data) {
-        return -1;
+        // open file, return error code if file doesn't exist
+        std::ofstream file(fileName);
+        if (!file.is_open()) return -1;
+
+        // seek to the page, write in data
+        file.seekp((pageNum + 1) * PAGE_SIZE, std::ios::beg);
+        file.write((const char *)data, PAGE_SIZE);
+
+        // increment counter, return successfully
+        ++writePageCounter;
+        return 0;
     }
 
     RC FileHandle::appendPage(const void *data) {
