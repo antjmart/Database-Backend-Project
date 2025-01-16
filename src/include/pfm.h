@@ -37,7 +37,7 @@ namespace PeterDB {
         unsigned writePageCounter;
         unsigned appendPageCounter;
 
-        FileHandle();                                                       // Default constructor
+        FileHandle(std::string fname);                                                       // Default constructor
         ~FileHandle();                                                      // Destructor
 
         RC readPage(PageNum pageNum, void *data);                           // Get a specific page

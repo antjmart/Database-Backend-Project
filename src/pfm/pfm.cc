@@ -30,10 +30,11 @@ namespace PeterDB {
         return -1;
     }
 
-    FileHandle::FileHandle() {
+    FileHandle::FileHandle(std::string fname) {
         readPageCounter = 0;
         writePageCounter = 0;
         appendPageCounter = 0;
+        fileName = fname;
     }
 
     FileHandle::~FileHandle() = default;
