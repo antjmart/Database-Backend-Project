@@ -1,4 +1,6 @@
 #include "src/include/pfm.h"
+#include <fstream>
+#include <iostream>
 
 namespace PeterDB {
     PagedFileManager &PagedFileManager::instance() {
@@ -30,11 +32,11 @@ namespace PeterDB {
         return -1;
     }
 
-    FileHandle::FileHandle(std::string fname) {
+    FileHandle::FileHandle() {
         readPageCounter = 0;
         writePageCounter = 0;
         appendPageCounter = 0;
-        fileName = fname;
+        fileName = "";
     }
 
     FileHandle::~FileHandle() = default;
