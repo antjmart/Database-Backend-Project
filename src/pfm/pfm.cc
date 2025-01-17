@@ -17,6 +17,11 @@ namespace PeterDB {
     PagedFileManager &PagedFileManager::operator=(const PagedFileManager &) = default;
 
     RC PagedFileManager::createFile(const std::string &fileName) {
+        std::ifstream fileCheck(fileName);
+        if (fileCheck.is_open()) {
+            fileCheck.close();
+            return -1;  // error if file already exists
+        }
         std::ofstream newFile(fileName);
         if (!newFile.is_open()) return -1; // check if file created successfully
 
@@ -32,7 +37,10 @@ namespace PeterDB {
     }
 
     RC PagedFileManager::openFile(const std::string &fileName, FileHandle &fileHandle) {
-        return -1;
+        // error code if fileHandle associated to file already
+        if (fileHandle.filename != "") return -1;
+        // either success or failure when file handle opens up the given file
+        return fileHandle.initFileHandle(fileName);
     }
 
     RC PagedFileManager::closeFile(FileHandle &fileHandle) {
