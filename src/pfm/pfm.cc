@@ -17,7 +17,14 @@ namespace PeterDB {
     PagedFileManager &PagedFileManager::operator=(const PagedFileManager &) = default;
 
     RC PagedFileManager::createFile(const std::string &fileName) {
-        return -1;
+        std::ofstream newFile(fileName);
+        if (!newFile.is_open()) return -1; // check if file created successfully
+
+        // initialize hidden page counters
+        newFile << "0 0 0 0\n";
+        // close unneeded file stream, return success
+        newFile.close();
+        return 0;
     }
 
     RC PagedFileManager::destroyFile(const std::string &fileName) {
@@ -48,6 +55,7 @@ namespace PeterDB {
         if (!file.is_open()) return -1;
 
         // grab counter values from hidden first page of file
+        file.seekg(0, std::ios::beg);
         file >> pageCount;
         file >> readPageCounter;
         file >> writePageCounter;
