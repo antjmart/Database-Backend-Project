@@ -40,6 +40,7 @@ namespace PeterDB {
     }
 
     FileHandle::FileHandle() {
+        filename = "";
         readPageCounter = 0;
         writePageCounter = 0;
         appendPageCounter = 0;
@@ -49,22 +50,26 @@ namespace PeterDB {
     FileHandle::~FileHandle() = default;
 
     RC FileHandle::initFileHandle(const std::string &fileName) {
-        // associate this file handle to file requested by PagedFileManager
-        file.open(fileName);
+        // attempt to open the file
+        std::ifstream file(fileName);
         // return error code if opening non-existent file
         if (!file.is_open()) return -1;
 
+        filename = fileName;
         // grab counter values from hidden first page of file
         file.seekg(0, std::ios::beg);
         file >> pageCount;
         file >> readPageCounter;
         file >> writePageCounter;
         file >> appendPageCounter;
+        file.close();
         return 0;
     }
 
     RC FileHandle::readPage(PageNum pageNum, void *data) {
-        // ensure file is actually open
+        // open up input stream for reading
+        std::ifstream file(filename);
+        // ensure file exists
         if (!file.is_open()) return -1;
         // ensure page exists
         if (pageNum >= pageCount) return -1;
@@ -74,12 +79,15 @@ namespace PeterDB {
         file.read(static_cast<char *>(data), PAGE_SIZE);
 
         // increment counter, return successfully
+        file.close();
         ++readPageCounter;
         return 0;
     }
 
     RC FileHandle::writePage(PageNum pageNum, const void *data) {
-        // ensure file is actually open
+        // open up file stream for writing
+        std::fstream file(filename);
+        // ensure file exists
         if (!file.is_open()) return -1;
         // ensure page exists
         if (pageNum >= pageCount) return -1;
@@ -89,12 +97,15 @@ namespace PeterDB {
         file.write(static_cast<const char *>(data), PAGE_SIZE);
 
         // increment counter, return successfully
+        file.close();
         ++writePageCounter;
         return 0;
     }
 
     RC FileHandle::appendPage(const void *data) {
-        // ensure file is actually open
+        // open up file stream for writing
+        std::fstream file(filename);
+        // ensure file exists
         if (!file.is_open()) return -1;
 
         // seek to new page position, write in data

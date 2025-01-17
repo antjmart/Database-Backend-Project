@@ -33,7 +33,7 @@ namespace PeterDB {
     class FileHandle {
     public:
         // file stream for reading and writing
-        std::fstream file;
+        std::string filename;
 
         // variables to keep the counter for each operation
         unsigned readPageCounter;
