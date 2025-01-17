@@ -53,7 +53,7 @@ namespace PeterDB {
 
         // seek to page we want, read page into data pointer
         file.seekg((pageNum + 1) * PAGE_SIZE, std::ios::beg);
-        file.read((char *)data, PAGE_SIZE);
+        file.read(static_cast<char *>(data), PAGE_SIZE);
 
         // increment counter, return successfully
         ++readPageCounter;
@@ -68,7 +68,7 @@ namespace PeterDB {
 
         // seek to the page, write in data
         file.seekp((pageNum + 1) * PAGE_SIZE, std::ios::beg);
-        file.write((const char *)data, PAGE_SIZE);
+        file.write(static_cast<const char *>(data), PAGE_SIZE);
 
         // increment counter, return successfully
         ++writePageCounter;
@@ -76,7 +76,16 @@ namespace PeterDB {
     }
 
     RC FileHandle::appendPage(const void *data) {
-        return -1;
+        // ensure file is actually open
+        if (!file.is_open()) return -1;
+
+        // seek to new page position, write in data
+        file.seekp(++pageCount * PAGE_SIZE, std::ios::beg);
+        file.write(static_cast<const char *>(data), PAGE_SIZE);
+
+        // increment counter, return successfully
+        ++appendPageCounter;
+        return 0;
     }
 
     unsigned FileHandle::getNumberOfPages() {
