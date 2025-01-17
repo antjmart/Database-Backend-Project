@@ -25,8 +25,6 @@ namespace PeterDB {
         std::ofstream newFile(fileName);
         if (!newFile.is_open()) return -1; // check if file created successfully
 
-        // initialize hidden page counters
-        newFile << "0 0 0 0\n";
         // close unneeded file stream, return success
         newFile.close();
         return 0;
@@ -38,13 +36,17 @@ namespace PeterDB {
 
     RC PagedFileManager::openFile(const std::string &fileName, FileHandle &fileHandle) {
         // error code if fileHandle associated to file already
-        if (fileHandle.filename != "") return -1;
+        if (!fileHandle.filename.empty()) return -1;
         // either success or failure when file handle opens up the given file
         return fileHandle.initFileHandle(fileName);
     }
 
     RC PagedFileManager::closeFile(FileHandle &fileHandle) {
-        return -1;
+        // error if fileHandle not associated to open file
+        if (fileHandle.filename.empty()) return -1;
+        // disassociate file handle
+        fileHandle.filename = "";
+        return 0;
     }
 
     FileHandle::FileHandle() {
@@ -59,17 +61,28 @@ namespace PeterDB {
 
     RC FileHandle::initFileHandle(const std::string &fileName) {
         // attempt to open the file
-        std::ifstream file(fileName);
+        std::fstream file(fileName);
         // return error code if opening non-existent file
         if (!file.is_open()) return -1;
 
         filename = fileName;
-        // grab counter values from hidden first page of file
-        file.seekg(0, std::ios::beg);
-        file >> pageCount;
-        file >> readPageCounter;
-        file >> writePageCounter;
-        file >> appendPageCounter;
+        file.seekg(0, std::ios::beg);  // set file pointer at start
+
+        std::string hidden_page;
+        std::getline(file, hidden_page);
+        // grab counter values from hidden first page of file, initialize if page not created
+        if (hidden_page.empty()) {
+            file.seekp(0, std::ios::beg);
+            file << "0 0 0 0\n";
+        } else {
+            file.seekg(0, std::ios::beg);
+            file >> pageCount;
+            file >> readPageCounter;
+            file >> writePageCounter;
+            file >> appendPageCounter;
+        }
+
+        // close stream, return success
         file.close();
         return 0;
     }
