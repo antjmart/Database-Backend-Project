@@ -89,11 +89,14 @@ namespace PeterDB {
     }
 
     unsigned FileHandle::getNumberOfPages() {
-        return -1;
+        return pageCount;
     }
 
     RC FileHandle::collectCounterValues(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount) {
-        return -1;
+        readPageCount = readPageCounter;
+        writePageCount = writePageCounter;
+        appendPageCount = appendPageCounter;
+        return 0;
     }
 
 } // namespace PeterDB
