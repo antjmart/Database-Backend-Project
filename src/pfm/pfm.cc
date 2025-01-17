@@ -41,8 +41,18 @@ namespace PeterDB {
 
     FileHandle::~FileHandle() = default;
 
-    RC initFileHandle(const std::string &fileName) {
-        return -1;
+    RC FileHandle::initFileHandle(const std::string &fileName) {
+        // associate this file handle to file requested by PagedFileManager
+        file.open(fileName);
+        // return error code if opening non-existent file
+        if (!file.is_open()) return -1;
+
+        // grab counter values from hidden first page of file
+        file >> pageCount;
+        file >> readPageCounter;
+        file >> writePageCounter;
+        file >> appendPageCounter;
+        return 0;
     }
 
     RC FileHandle::readPage(PageNum pageNum, void *data) {
