@@ -46,7 +46,7 @@ namespace PeterDB {
         // error if fileHandle not associated to open file
         if (!fileHandle.file.is_open()) return -1;
         // disassociate file handle
-        fileHandle.file.close();
+        fileHandle.detachFile();
         return 0;
     }
 
@@ -79,14 +79,13 @@ namespace PeterDB {
         // grab counter values from hidden first page of file, initialize if page not created
         if (hidden_page.empty()) {
             file.seekp(0, std::ios::beg);
-            file << "0 0 0 0\n";
-        } else {
-            file.seekg(0, std::ios::beg);
-            file >> pageCount;
-            file >> readPageCounter;
-            file >> writePageCounter;
-            file >> appendPageCounter;
+            file << "0 0 0 0 \n";
         }
+        file.seekg(0, std::ios::beg);
+        file >> pageCount;
+        file >> readPageCounter;
+        file >> writePageCounter;
+        file >> appendPageCounter;
 
         return 0;
     }
@@ -138,4 +137,9 @@ namespace PeterDB {
         return 0;
     }
 
+    void FileHandle::detachFile() {
+        file.seekp(0, std::ios::beg);
+        file << pageCount << ' ' << readPageCounter << ' ' << writePageCounter << ' ' << appendPageCounter << " \n";
+        file.close();
+    }
 } // namespace PeterDB
