@@ -2,6 +2,7 @@
 #include <fstream>
 #include <iostream>
 
+
 namespace PeterDB {
     PagedFileManager &PagedFileManager::instance() {
         static PagedFileManager _pf_manager = PagedFileManager();
@@ -23,7 +24,7 @@ namespace PeterDB {
             return -1;  // error if file already exists
         }
         std::ofstream newFile(fileName);
-        if (!newFile.is_open()) return -1; // check if file created successfully
+        if (!newFile.good()) return -1; // check if file created successfully
 
         // close unneeded file stream, return success
         newFile.close();
@@ -36,21 +37,20 @@ namespace PeterDB {
 
     RC PagedFileManager::openFile(const std::string &fileName, FileHandle &fileHandle) {
         // error code if fileHandle associated to file already
-        if (!fileHandle.filename.empty()) return -1;
+        if (fileHandle.file.is_open()) return -1;
         // either success or failure when file handle opens up the given file
         return fileHandle.initFileHandle(fileName);
     }
 
     RC PagedFileManager::closeFile(FileHandle &fileHandle) {
         // error if fileHandle not associated to open file
-        if (fileHandle.filename.empty()) return -1;
+        if (!fileHandle.file.is_open()) return -1;
         // disassociate file handle
-        fileHandle.filename = "";
+        fileHandle.file.close();
         return 0;
     }
 
     FileHandle::FileHandle() {
-        filename = "";
         readPageCounter = 0;
         writePageCounter = 0;
         appendPageCounter = 0;
@@ -59,14 +59,20 @@ namespace PeterDB {
 
     FileHandle::~FileHandle() = default;
 
+    FileHandle & FileHandle::operator = (const FileHandle & other) {
+        // file stream will not be copied, assignment is for copying counters
+        readPageCounter = other.readPageCounter;
+        writePageCounter = other.writePageCounter;
+        appendPageCounter = other.appendPageCounter;
+        pageCount = other.pageCount;
+        return *this;
+    }
+
     RC FileHandle::initFileHandle(const std::string &fileName) {
         // attempt to open the file
-        std::fstream file(fileName);
+        file.open(fileName);
         // return error code if opening non-existent file
         if (!file.is_open()) return -1;
-
-        filename = fileName;
-        file.seekg(0, std::ios::beg);  // set file pointer at start
 
         std::string hidden_page;
         std::getline(file, hidden_page);
@@ -82,16 +88,10 @@ namespace PeterDB {
             file >> appendPageCounter;
         }
 
-        // close stream, return success
-        file.close();
         return 0;
     }
 
     RC FileHandle::readPage(PageNum pageNum, void *data) {
-        // open up input stream for reading
-        std::ifstream file(filename);
-        // ensure file exists
-        if (!file.is_open()) return -1;
         // ensure page exists
         if (pageNum >= pageCount) return -1;
 
@@ -100,16 +100,11 @@ namespace PeterDB {
         file.read(static_cast<char *>(data), PAGE_SIZE);
 
         // increment counter, return successfully
-        file.close();
         ++readPageCounter;
         return 0;
     }
 
     RC FileHandle::writePage(PageNum pageNum, const void *data) {
-        // open up file stream for writing
-        std::fstream file(filename);
-        // ensure file exists
-        if (!file.is_open()) return -1;
         // ensure page exists
         if (pageNum >= pageCount) return -1;
 
@@ -118,17 +113,11 @@ namespace PeterDB {
         file.write(static_cast<const char *>(data), PAGE_SIZE);
 
         // increment counter, return successfully
-        file.close();
         ++writePageCounter;
         return 0;
     }
 
     RC FileHandle::appendPage(const void *data) {
-        // open up file stream for writing
-        std::fstream file(filename);
-        // ensure file exists
-        if (!file.is_open()) return -1;
-
         // seek to new page position, write in data
         file.seekp(++pageCount * PAGE_SIZE, std::ios::beg);
         file.write(static_cast<const char *>(data), PAGE_SIZE);

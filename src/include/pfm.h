@@ -33,7 +33,7 @@ namespace PeterDB {
     class FileHandle {
     public:
         // file stream for reading and writing
-        std::string filename;
+        std::fstream file;
 
         // variables to keep the counter for each operation
         unsigned readPageCounter;
@@ -43,6 +43,7 @@ namespace PeterDB {
 
         FileHandle();                                                       // Default constructor
         ~FileHandle();                                                      // Destructor
+        FileHandle & operator = (const FileHandle & other);                 // Assigns counters, not open file
 
         RC initFileHandle(const std::string &fileName);                     // Pull info from file's first page
         RC readPage(PageNum pageNum, void *data);                           // Get a specific page
