@@ -35,7 +35,7 @@ namespace PeterDB {
 
     unsigned short RecordBasedFileManager::calcRecordSpace(const std::vector<Attribute> &recordDescriptor, const void * data) {
         // need 4 bytes for record directory entry, 2 for offset and 2 for length
-        // need 2 more for number of non-null fields
+        // need 2 more for number of fields
         unsigned short recordSpace = 6;
         unsigned numFields = recordDescriptor.size();
         unsigned nullFlagBytes = numFields / 8;
@@ -133,7 +133,39 @@ namespace PeterDB {
     }
 
     unsigned short RecordBasedFileManager::putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, unsigned short recordSpace) {
-        return 0;
+        char * firstByte = (char *)pageData;
+
+        // get current free space value, update it, then write it back
+        unsigned short freeSpace;
+        memcpy(&freeSpace, firstByte + (PAGE_SIZE - 2), 2);
+        freeSpace -= recordSpace;
+        memcpy(firstByte + (PAGE_SIZE - 2), &freeSpace, 2);  // adds F value for free space
+
+        // get current N value, increase by 1, write it back
+        unsigned short N;
+        memcpy(&N, firstByte + (PAGE_SIZE - 4), 2);
+        ++N;
+        memcpy(firstByte + (PAGE_SIZE - 4), &N, 2);
+
+        // calculate the offset that this new record will have into the page using last record's values
+        unsigned short offset;
+        if (N == 1)
+            offset = 0;
+        else {
+            memcpy(&offset, firstByte + (PAGE_SIZE - 4 - 4 * (N - 1)), 2);
+            unsigned short len;
+            memcpy(&len, firstByte + (PAGE_SIZE - 4 - 4 * (N - 1) + 2), 2);
+            offset += len;
+        }
+
+        // create record directory entry for new record
+        unsigned short length = recordSpace - 4;
+        memcpy(firstByte + (PAGE_SIZE - 4 - 4 * N + 2), &length, 2);
+        memcpy(firstByte + (PAGE_SIZE - 4 - 4 * N), &offset, 2);
+
+        // record itself is placed into page, N is the returned slot number
+        embedRecord(offset, recordDescriptor, data, pageData);
+        return N;
     }
 
     RC RecordBasedFileManager::insertRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
