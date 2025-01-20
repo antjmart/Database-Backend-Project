@@ -139,6 +139,10 @@ namespace PeterDB {
         RecordBasedFileManager(const RecordBasedFileManager &);                     // Prevent construction by copying
         RecordBasedFileManager &operator=(const RecordBasedFileManager &);          // Prevent assignment
 
+        // helper functions for insertRecord method
+        unsigned short calcRecordSpace(const std::vector<Attribute> &recordDescriptor);
+        unsigned short putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, void * pageData);
+        unsigned short putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, void * pageData);
     };
 
 } // namespace PeterDB
