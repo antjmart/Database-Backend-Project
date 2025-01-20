@@ -1,7 +1,7 @@
 #include "src/include/pfm.h"
 #include <fstream>
 #include <iostream>
-
+#include <cstdio>
 
 namespace PeterDB {
     PagedFileManager &PagedFileManager::instance() {
@@ -32,7 +32,8 @@ namespace PeterDB {
     }
 
     RC PagedFileManager::destroyFile(const std::string &fileName) {
-        return -1;
+        RC removeStatus = remove(fileName.c_str());
+        return removeStatus == 0 ? 0 : -1;
     }
 
     RC PagedFileManager::openFile(const std::string &fileName, FileHandle &fileHandle) {
