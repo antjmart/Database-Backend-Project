@@ -69,19 +69,25 @@ namespace PeterDB {
         return *this;
     }
 
+    void FileHandle::createHiddenPage() {
+        file.seekp(0, std::ios::beg);
+        file << "0 0 0 0";
+        for (int i = 7; i < PAGE_SIZE; ++i)
+            file << '\0';
+        file.flush();
+    }
+
     RC FileHandle::initFileHandle(const std::string &fileName) {
         // attempt to open the file
         file.open(fileName);
         // return error code if opening non-existent file
         if (!file.is_open()) return -1;
 
-        std::string hidden_page;
-        std::getline(file, hidden_page);
-        // grab counter values from hidden first page of file, initialize if page not created
-        if (hidden_page.empty()) {
-            file.seekp(0, std::ios::beg);
-            file << "0 0 0 0 \n";
-        }
+        // initialize hidden page if empty file
+        file.seekg(0, std::ios::end);
+        if (file.tellg() == 0) createHiddenPage();
+
+        // grab counter values from hidden first page of file
         file.seekg(0, std::ios::beg);
         file >> pageCount;
         file >> readPageCounter;
@@ -111,6 +117,7 @@ namespace PeterDB {
         // seek to the page, write in data
         file.seekp((pageNum + 1) * PAGE_SIZE, std::ios::beg);
         file.write(static_cast<const char *>(data), PAGE_SIZE);
+        file.flush();
 
         // increment counter, return successfully
         ++writePageCounter;
@@ -121,6 +128,7 @@ namespace PeterDB {
         // seek to new page position, write in data
         file.seekp(++pageCount * PAGE_SIZE, std::ios::beg);
         file.write(static_cast<const char *>(data), PAGE_SIZE);
+        file.flush();
 
         // increment counter, return successfully
         ++appendPageCounter;

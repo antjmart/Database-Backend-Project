@@ -54,6 +54,9 @@ namespace PeterDB {
                                 unsigned &appendPageCount);                 // Put current counter values into variables
 
         void detachFile();                                                  // Update open file hidden page then detach
+
+    private:
+        void createHiddenPage();                                            // Helper function for creating hidden page
     };
 
 } // namespace PeterDB
