@@ -50,7 +50,7 @@ namespace PeterDB {
             memcpy(&flagByte, (const char *)data + i, 1);
 
             for (unsigned j = 0; j < 8 && j < fieldsRemaining; ++j, recordSpace += 2)
-                if (((flagByte >> j) & 1) == 0) {
+                if (((flagByte >> (7 - j)) & 1) == 0) {
                     // null bit flag of zero means space is needed
                     Attribute attr{recordDescriptor[i * 8 + j]};
                     if (attr.type != TypeVarChar) {
@@ -92,7 +92,7 @@ namespace PeterDB {
                 memcpy(recoPos, &currFieldOffset, 2);  // set directory pointer for field
                 recoPos += 2;
 
-                if (((flagByte >> j) & 1) == 0) {
+                if (((flagByte >> (7 - j)) & 1) == 0) {
                     // null bit flag of zero means field length must be considered
                     Attribute attr{recordDescriptor[i * 8 + j]};
                     if (attr.type != TypeVarChar) {
@@ -221,7 +221,29 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                           const RID &rid, void *data) {
-        return -1;
+        void * pageData = malloc(PAGE_SIZE);
+        if (fileHandle.readPage(rid.pageNum, pageData) == -1) return -1;
+
+        // pull offset and length of record from on-page directory
+        unsigned short recoOffset;
+        memcpy(&recoOffset, (const char *)pageData + (PAGE_SIZE - 4 - 4 * rid.slotNum), 2);
+        unsigned short recoLen;
+        memcpy(&recoLen, (const char *)pageData + (PAGE_SIZE - 4 - 4 * rid.slotNum + 2), 2);
+
+        const char * recoStart = (const char *)pageData + recoOffset;
+        unsigned short bytesFromStart = 2;  // start looking after the initial 2-byte len number
+
+        // calculate number of null flag bytes, copy those bytes from the record
+        unsigned nullFlagBytes = recordDescriptor.size() / 8;
+        if (nullFlagBytes % 8 != 0) ++nullFlagBytes;
+        memcpy(data, recoStart + bytesFromStart, nullFlagBytes);
+        data = (char *)data + nullFlagBytes;
+        // now skip over the null bytes and all the directory bytes
+        bytesFromStart += nullFlagBytes + 2 * recordDescriptor.size();
+
+        // copy rest of record into data variable
+        memcpy(data, recoStart + bytesFromStart, recoLen - bytesFromStart);
+        return 0;
     }
 
     RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
