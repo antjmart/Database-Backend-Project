@@ -143,6 +143,7 @@ namespace PeterDB {
         unsigned short calcRecordSpace(const std::vector<Attribute> &recordDescriptor, const void * data);
         unsigned short putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, unsigned short recordSpace);
         unsigned short putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, unsigned short recordSpace);
+        void embedRecord(unsigned short offset, const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData);
     };
 
 } // namespace PeterDB
