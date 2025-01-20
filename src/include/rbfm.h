@@ -141,8 +141,8 @@ namespace PeterDB {
 
         // helper functions for insertRecord method
         unsigned short calcRecordSpace(const std::vector<Attribute> &recordDescriptor, const void * data);
-        unsigned short putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData);
-        unsigned short putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData);
+        unsigned short putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, unsigned short recordSpace);
+        unsigned short putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, unsigned short recordSpace);
     };
 
 } // namespace PeterDB
