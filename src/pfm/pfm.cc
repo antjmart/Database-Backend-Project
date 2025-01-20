@@ -79,7 +79,7 @@ namespace PeterDB {
 
     RC FileHandle::initFileHandle(const std::string &fileName) {
         // attempt to open the file
-        file.open(fileName);
+        file.open(fileName, std::ios::in | std::ios::out | std::ios::binary);
         // return error code if opening non-existent file
         if (!file.is_open()) return -1;
 
