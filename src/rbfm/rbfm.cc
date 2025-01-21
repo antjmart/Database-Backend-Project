@@ -43,7 +43,7 @@ namespace PeterDB {
         recordSpace += nullFlagBytes;
 
         // each non-null field needs 2 bytes for offset pointer, plus data type size
-        unsigned fieldsRemaining = numFields;
+        int fieldsRemaining = numFields;
         unsigned dataPos = nullFlagBytes;
         for (unsigned i = 0, flagByte = 0; i < nullFlagBytes; ++i, flagByte = 0, fieldsRemaining -= 8) {
             // get set of 8 null flag bits
@@ -82,7 +82,7 @@ namespace PeterDB {
         recoPos += nullFlagBytes;
 
         unsigned short currFieldOffset = 2 + nullFlagBytes + 2 * numFields;  // field offsets go from record start
-        unsigned fieldsRemaining = recordDescriptor.size();
+        int fieldsRemaining = recordDescriptor.size();
         unsigned short dataPos = nullFlagBytes;  // this keeps track of how far into data byte stream to be
         for (unsigned i = 0, flagByte = 0; i < nullFlagBytes; ++i, flagByte = 0, fieldsRemaining -= 8) {
             // get set of 8 null flag bits
@@ -171,6 +171,7 @@ namespace PeterDB {
     RC RecordBasedFileManager::insertRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                             const void *data, RID &rid) {
         void * pageData = malloc(PAGE_SIZE);
+        memset(pageData, 0, PAGE_SIZE);
         unsigned pageNum;  // page which record will be inserted to, starts with last page
         unsigned freeIndex = PAGE_SIZE / sizeof(unsigned short) - 1;
         unsigned short recordSpace = calcRecordSpace(recordDescriptor, data);
@@ -194,8 +195,7 @@ namespace PeterDB {
                 }
 
                 if (pageNum == fileHandle.pageCount - 1) {
-                    free(pageData);
-                    pageData = malloc(PAGE_SIZE);
+                    memset(pageData, 0, PAGE_SIZE);
                     ++pageNum;
                 }
             }
@@ -260,13 +260,14 @@ namespace PeterDB {
 
         // skip over null flag bytes to get to useful data
         const char * dataPos = (const char *)data + nullFlagBytes;
-        unsigned short fieldsRemaining = recordDescriptor.size();
+        int fieldsRemaining = recordDescriptor.size();
 
         // attribute variables for saving attribute information in the loops
         Attribute attr;
         unsigned short attrNum = 0;
 
-        for (unsigned i = 0, flagByte = 0; i < nullFlagBytes; ++i, flagByte = 0, fieldsRemaining -= 8) {
+        unsigned flagByte = 0;
+        for (unsigned i = 0; i < nullFlagBytes; ++i, flagByte = 0, fieldsRemaining -= 8) {
             memcpy(&flagByte, (const char *)data + i, 1);
 
             for (unsigned j = 0; j < 8 && j < fieldsRemaining; ++j) {
@@ -301,12 +302,12 @@ namespace PeterDB {
                     // null value for attribute
                     out << "NULL";
                 }
-            }
 
-            if (attrNum >= recordDescriptor.size() - 1)
-                out << '\n';
-            else
-                out << ", ";
+                if (attrNum >= recordDescriptor.size() - 1)
+                    out << '\n';
+                else
+                    out << ", ";
+            }
         }
 
         return 0;
