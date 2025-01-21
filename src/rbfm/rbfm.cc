@@ -182,13 +182,13 @@ namespace PeterDB {
         } else {
             unsigned short freeSpace;
             pageNum = fileHandle.pageCount - 1;
-            if (fileHandle.readPage(pageNum, pageData) == -1) return -1;
+            if (fileHandle.readPage(pageNum, pageData) == -1) {free(pageData); return -1;}
             freeSpace = ((unsigned short *)pageData)[freeIndex];
 
             // if not enough space, need to start iterating through other pages
             if (recordSpace > freeSpace) {
                 for (pageNum = 0; pageNum < fileHandle.pageCount - 1; ++pageNum) {
-                    if (fileHandle.readPage(pageNum, pageData) == -1) return -1;
+                    if (fileHandle.readPage(pageNum, pageData) == -1) {free(pageData); return -1;}
                     freeSpace = ((unsigned short *)pageData)[freeIndex];
                     if (recordSpace <= freeSpace) break;  // stop searching if enough space
                 }
@@ -222,7 +222,7 @@ namespace PeterDB {
     RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                           const RID &rid, void *data) {
         void * pageData = malloc(PAGE_SIZE);
-        if (fileHandle.readPage(rid.pageNum, pageData) == -1) return -1;
+        if (fileHandle.readPage(rid.pageNum, pageData) == -1) {free(pageData); return -1;}
 
         // pull offset and length of record from on-page directory
         unsigned short recoOffset;
@@ -243,6 +243,7 @@ namespace PeterDB {
 
         // copy rest of record into data variable
         memcpy(data, recoStart + bytesFromStart, recoLen - bytesFromStart);
+        free(pageData);
         return 0;
     }
 
@@ -253,7 +254,62 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::printRecord(const std::vector<Attribute> &recordDescriptor, const void *data,
                                            std::ostream &out) {
-        return -1;
+        // calculate number of bytes for null flags
+        unsigned nullFlagBytes = recordDescriptor.size() / 8;
+        if (nullFlagBytes % 8 != 0) ++nullFlagBytes;
+
+        // skip over null flag bytes to get to useful data
+        const char * dataPos = (const char *)data + nullFlagBytes;
+        unsigned short fieldsRemaining = recordDescriptor.size();
+
+        // attribute variables for saving attribute information in the loops
+        Attribute attr;
+        unsigned short attrNum = 0;
+
+        for (unsigned i = 0, flagByte = 0; i < nullFlagBytes; ++i, flagByte = 0, fieldsRemaining -= 8) {
+            memcpy(&flagByte, (const char *)data + i, 1);
+
+            for (unsigned j = 0; j < 8 && j < fieldsRemaining; ++j) {
+                attrNum = i * 8 + j;
+                attr = recordDescriptor[attrNum];
+                out << attr.name << ": ";
+
+                if (((flagByte >> (7 - j)) & 1) == 0) {
+                    // null bit flag of zero means non-null
+                    if (attr.type == TypeInt) {
+                        int val;
+                        memcpy(&val, dataPos, attr.length);
+                        out << val;
+                        dataPos += attr.length;
+                    } else if (attr.type == TypeReal) {
+                        float val;
+                        memcpy(&val, dataPos, attr.length);
+                        out << val;
+                        dataPos += attr.length;
+                    } else {
+                        // must get 4-byte length value from varchar field to know needed space
+                        unsigned varcharLen = 0;
+                        memcpy(&varcharLen, dataPos, 4);
+                        dataPos += 4;
+                        char val[varcharLen + 1];
+                        memcpy(val, dataPos, varcharLen);
+                        val[varcharLen] = '\0';
+                        out << val;
+                        dataPos += varcharLen;
+                    }
+                } else {
+                    // null value for attribute
+                    out << "NULL";
+                }
+            }
+
+            if (attrNum >= recordDescriptor.size() - 1)
+                out << '\n';
+            else
+                out << ", ";
+        }
+
+        return 0;
     }
 
     RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
