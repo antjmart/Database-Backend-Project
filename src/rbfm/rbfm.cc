@@ -39,13 +39,14 @@ namespace PeterDB {
         unsigned short recordSpace = 6;
         unsigned numFields = recordDescriptor.size();
         unsigned nullFlagBytes = numFields / 8;
-        if (nullFlagBytes % 8 != 0) ++nullFlagBytes;
+        if (numFields % 8 != 0) ++nullFlagBytes;
         recordSpace += nullFlagBytes;
 
         // each non-null field needs 2 bytes for offset pointer, plus data type size
         int fieldsRemaining = numFields;
         unsigned dataPos = nullFlagBytes;
-        for (unsigned i = 0, flagByte = 0; i < nullFlagBytes; ++i, flagByte = 0, fieldsRemaining -= 8) {
+        unsigned char flagByte;
+        for (unsigned i = 0; i < nullFlagBytes; ++i, fieldsRemaining -= 8) {
             // get set of 8 null flag bits
             memcpy(&flagByte, (const char *)data + i, 1);
 
@@ -73,7 +74,7 @@ namespace PeterDB {
         char * recoStart = (char *)pageData + offset;
         char * recoPos = recoStart;  // starting position of record entry in pageData
         unsigned nullFlagBytes = recordDescriptor.size() / 8;
-        if (nullFlagBytes % 8 != 0) ++nullFlagBytes;  // number of bytes used for the null flags
+        if (recordDescriptor.size() % 8 != 0) ++nullFlagBytes;  // number of bytes used for the null flags
         unsigned short numFields = recordDescriptor.size();  // number of fields
 
         memcpy(recoPos, &numFields, 2);  // first put number of fields
@@ -84,7 +85,8 @@ namespace PeterDB {
         unsigned short currFieldOffset = 2 + nullFlagBytes + 2 * numFields;  // field offsets go from record start
         int fieldsRemaining = recordDescriptor.size();
         unsigned short dataPos = nullFlagBytes;  // this keeps track of how far into data byte stream to be
-        for (unsigned i = 0, flagByte = 0; i < nullFlagBytes; ++i, flagByte = 0, fieldsRemaining -= 8) {
+        unsigned char flagByte;
+        for (unsigned i = 0; i < nullFlagBytes; ++i, fieldsRemaining -= 8) {
             // get set of 8 null flag bits
             memcpy(&flagByte, (const char *)data + i, 1);
 
@@ -235,7 +237,7 @@ namespace PeterDB {
 
         // calculate number of null flag bytes, copy those bytes from the record
         unsigned nullFlagBytes = recordDescriptor.size() / 8;
-        if (nullFlagBytes % 8 != 0) ++nullFlagBytes;
+        if (recordDescriptor.size() % 8 != 0) ++nullFlagBytes;
         memcpy(data, recoStart + bytesFromStart, nullFlagBytes);
         data = (char *)data + nullFlagBytes;
         // now skip over the null bytes and all the directory bytes
@@ -256,7 +258,7 @@ namespace PeterDB {
                                            std::ostream &out) {
         // calculate number of bytes for null flags
         unsigned nullFlagBytes = recordDescriptor.size() / 8;
-        if (nullFlagBytes % 8 != 0) ++nullFlagBytes;
+        if (recordDescriptor.size() % 8 != 0) ++nullFlagBytes;
 
         // skip over null flag bytes to get to useful data
         const char * dataPos = (const char *)data + nullFlagBytes;
@@ -266,8 +268,8 @@ namespace PeterDB {
         Attribute attr;
         unsigned short attrNum = 0;
 
-        unsigned flagByte = 0;
-        for (unsigned i = 0; i < nullFlagBytes; ++i, flagByte = 0, fieldsRemaining -= 8) {
+        unsigned char flagByte;
+        for (unsigned i = 0; i < nullFlagBytes; ++i, fieldsRemaining -= 8) {
             memcpy(&flagByte, (const char *)data + i, 1);
 
             for (unsigned j = 0; j < 8 && j < fieldsRemaining; ++j) {
