@@ -21,9 +21,23 @@ if my functionality for things were correct.
 
 ### 3. Using Valgrind
 - Describe how you use Valgrind to detect memory leaks and other problems in your code and show screenshot of the Valgrind report.
-- ![img_1.png](img_1.png)
 
-Clean memory usage for all the pfm tests. This helped ensure I was using malloc correctly then
-running free when needed.
+I built the gtest files and ran those executables with
+valgrind to ensure memory was used correctly.
 
-More memory loss occurred with RBFM tests due to incorrect implementations.
+PFM Tests Run with Valgrind Memcheck:
+
+![img_3.png](img_3.png)
+
+![img_4.png](img_4.png)
+
+Clean memory usage for all the PFM tests, no valgrind feedback.
+
+RBFM Tests Run with Valgrind Memcheck:
+
+![img_5.png](img_5.png)
+
+![img_6.png](img_6.png)
+
+Mostly clean memory usage for RBFM tests, soft warning from internal
+testing library function, nothing from source code.
