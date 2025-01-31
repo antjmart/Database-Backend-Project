@@ -72,7 +72,7 @@ namespace PeterDB {
     void FileHandle::createHiddenPage() {
         file.seekp(0, std::ios::beg);
         file << "0 0 0 0";
-        for (int i = 7; i < PAGE_SIZE; ++i)
+        for (int bytesWritten = 7; bytesWritten < PAGE_SIZE; ++bytesWritten)
             file << '\0';
         file.flush();
     }

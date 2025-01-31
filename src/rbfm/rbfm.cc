@@ -1,7 +1,18 @@
 #include "src/include/rbfm.h"
-#include <cstdlib>
 #include <cstring>
 #include <iostream>
+
+constexpr PeterDB::SizeType BYTES_FOR_SLOT_DIR_OFFSET = 2;
+constexpr PeterDB::SizeType BYTES_FOR_SLOT_DIR_LENGTH = 2;
+constexpr PeterDB::SizeType BYTES_FOR_SLOT_DIR_ENTRY = BYTES_FOR_SLOT_DIR_LENGTH + BYTES_FOR_SLOT_DIR_OFFSET;
+constexpr PeterDB::SizeType BYTES_FOR_RECORD_FIELD_COUNT = 2;
+constexpr int INT_BYTES = 4;
+constexpr int BITS_IN_BYTE = 8;
+constexpr PeterDB::SizeType BYTES_FOR_POINTER_TO_RECORD_FIELD = 2;
+constexpr PeterDB::SizeType BYTES_FOR_PAGE_SLOT_COUNT = 2;
+constexpr PeterDB::SizeType BYTES_FOR_PAGE_FREE_SPACE = 2;
+constexpr PeterDB::SizeType BYTES_FOR_PAGE_STATS = BYTES_FOR_PAGE_SLOT_COUNT + BYTES_FOR_PAGE_FREE_SPACE;
+
 
 namespace PeterDB {
     RecordBasedFileManager &RecordBasedFileManager::instance() {
@@ -33,36 +44,44 @@ namespace PeterDB {
         return PagedFileManager::instance().closeFile(fileHandle);
     }
 
-    unsigned short RecordBasedFileManager::calcRecordSpace(const std::vector<Attribute> &recordDescriptor, const void * data) {
-        // need 4 bytes for record directory entry, 2 for offset and 2 for length
-        // need 2 more for number of fields
-        unsigned short recordSpace = 6;
-        unsigned numFields = recordDescriptor.size();
-        unsigned nullFlagBytes = numFields / 8;
-        if (numFields % 8 != 0) ++nullFlagBytes;
+    SizeType RecordBasedFileManager::nullBytesNeeded(SizeType numFields) {
+        SizeType nullBytes = numFields / BITS_IN_BYTE;
+        return (numFields % BITS_IN_BYTE == 0) ? nullBytes : nullBytes + 1;
+    }
+
+    bool RecordBasedFileManager::nullBitOn(unsigned char nullByte, int bitNum) {
+        // bitNum starts from 1
+        return (1 & (nullByte >> (BITS_IN_BYTE - bitNum))) == 1;
+    }
+
+    SizeType RecordBasedFileManager::calcRecordSpace(const std::vector<Attribute> &recordDescriptor, const void * data) {
+        // need bytes for record directory entry, for offset and length
+        // need more for number of fields
+        SizeType recordSpace = BYTES_FOR_SLOT_DIR_ENTRY + BYTES_FOR_RECORD_FIELD_COUNT;
+        SizeType nullFlagBytes = nullBytesNeeded(recordDescriptor.size());
         recordSpace += nullFlagBytes;
 
         // each non-null field needs 2 bytes for offset pointer, plus data type size
-        int fieldsRemaining = numFields;
-        unsigned dataPos = nullFlagBytes;
+        int fieldsRemaining = recordDescriptor.size();
+        SizeType dataPos = nullFlagBytes;
         unsigned char flagByte;
-        for (unsigned i = 0; i < nullFlagBytes; ++i, fieldsRemaining -= 8) {
-            // get set of 8 null flag bits
-            memcpy(&flagByte, (const char *)data + i, 1);
+        for (SizeType i = 0; i < nullFlagBytes; ++i, fieldsRemaining -= BITS_IN_BYTE) {
+            // get a set of null flag bits
+            memmove(&flagByte, static_cast<const char *>(data) + i, 1);
 
-            for (unsigned j = 0; j < 8 && j < fieldsRemaining; ++j, recordSpace += 2)
-                if (((flagByte >> (7 - j)) & 1) == 0) {
-                    // null bit flag of zero means space is needed
-                    Attribute attr{recordDescriptor[i * 8 + j]};
+            for (int j = 1; j <= BITS_IN_BYTE && j <= fieldsRemaining; ++j, recordSpace += BYTES_FOR_POINTER_TO_RECORD_FIELD)
+                if (!nullBitOn(flagByte, j)) {
+                    // non-null attribute value means space is needed
+                    Attribute attr{recordDescriptor[i * BITS_IN_BYTE + j - 1]};
                     if (attr.type != TypeVarChar) {
                         recordSpace += attr.length;
                         dataPos += attr.length;
                     } else {
-                        // must get 4-byte length value from varchar field to know needed space
-                        unsigned varcharLen = 0;
-                        memcpy(&varcharLen, (const char *)data + dataPos, 4);
-                        recordSpace += 4 + varcharLen;
-                        dataPos += 4 + varcharLen;
+                        // must get int sized length value from varchar field to know needed space
+                        int varcharLen = 0;
+                        memmove(&varcharLen, static_cast<const char *>(data) + dataPos, INT_BYTES);
+                        recordSpace += INT_BYTES + varcharLen;
+                        dataPos += INT_BYTES + varcharLen;
                     }
                 }
         }
@@ -70,100 +89,100 @@ namespace PeterDB {
         return recordSpace;
     }
 
-    void RecordBasedFileManager::embedRecord(unsigned short offset, const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData) {
-        char * recoStart = (char *)pageData + offset;
+    void RecordBasedFileManager::embedRecord(SizeType offset, const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData) {
+        char * recoStart = static_cast<char *>(pageData) + offset;
         char * recoPos = recoStart;  // starting position of record entry in pageData
-        unsigned nullFlagBytes = recordDescriptor.size() / 8;
-        if (recordDescriptor.size() % 8 != 0) ++nullFlagBytes;  // number of bytes used for the null flags
-        unsigned short numFields = recordDescriptor.size();  // number of fields
+        SizeType numFields = recordDescriptor.size();  // number of fields
+        SizeType nullFlagBytes = nullBytesNeeded(numFields);  // number of bytes used for the null flags
 
-        memcpy(recoPos, &numFields, 2);  // first put number of fields
-        recoPos += 2;
-        memcpy(recoPos, data, nullFlagBytes);  // get null flag bits
+        memmove(recoPos, &numFields, BYTES_FOR_RECORD_FIELD_COUNT);  // first put number of fields
+        recoPos += BYTES_FOR_RECORD_FIELD_COUNT;
+        memmove(recoPos, data, nullFlagBytes);  // get null flag bits
         recoPos += nullFlagBytes;
 
-        unsigned short currFieldOffset = 2 + nullFlagBytes + 2 * numFields;  // field offsets go from record start
-        int fieldsRemaining = recordDescriptor.size();
-        unsigned short dataPos = nullFlagBytes;  // this keeps track of how far into data byte stream to be
+        SizeType currFieldOffset = BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytes + BYTES_FOR_POINTER_TO_RECORD_FIELD * numFields;  // field offsets go from record start
+        int fieldsRemaining = numFields;
+        SizeType dataPos = nullFlagBytes;  // this keeps track of how far into data byte stream to be
         unsigned char flagByte;
-        for (unsigned i = 0; i < nullFlagBytes; ++i, fieldsRemaining -= 8) {
-            // get set of 8 null flag bits
-            memcpy(&flagByte, (const char *)data + i, 1);
+        for (SizeType i = 0; i < nullFlagBytes; ++i, fieldsRemaining -= BITS_IN_BYTE) {
+            // get byte of null flag bits
+            memmove(&flagByte, static_cast<const char *>(data) + i, 1);
 
-            for (unsigned j = 0; j < 8 && j < fieldsRemaining; ++j) {
-                memcpy(recoPos, &currFieldOffset, 2);  // set directory pointer for field
-                recoPos += 2;
+            for (int j = 1; j <= BITS_IN_BYTE && j <= fieldsRemaining; ++j) {
+                memmove(recoPos, &currFieldOffset, BYTES_FOR_POINTER_TO_RECORD_FIELD);  // set directory pointer for field
+                recoPos += BYTES_FOR_POINTER_TO_RECORD_FIELD;
 
-                if (((flagByte >> (7 - j)) & 1) == 0) {
-                    // null bit flag of zero means field length must be considered
-                    Attribute attr{recordDescriptor[i * 8 + j]};
+                if (!nullBitOn(flagByte, j)) {
+                    // non-null attribute value means field length must be considered
+                    Attribute attr{recordDescriptor[i * BITS_IN_BYTE + j - 1]};
                     if (attr.type != TypeVarChar) {
                         // copy field data to the record byte stream at current pointer offset
-                        memcpy(recoStart + currFieldOffset, (const char *)data + dataPos, attr.length);
+                        memmove(recoStart + currFieldOffset, static_cast<const char *>(data) + dataPos, attr.length);
                         currFieldOffset += attr.length;
                         dataPos += attr.length;
                     } else {
-                        // must get 4-byte length value from varchar field to know needed space
-                        unsigned varcharLen = 0;
-                        memcpy(&varcharLen, (const char *)data + dataPos, 4);
+                        // must get int sized length value from varchar field to know needed space
+                        int varcharLen = 0;
+                        memmove(&varcharLen, static_cast<const char *>(data) + dataPos, INT_BYTES);
                         // copy field data to the record byte stream at current pointer offset
-                        memcpy(recoStart + currFieldOffset, (const char *)data + dataPos, 4 + varcharLen);
-                        currFieldOffset += 4 + varcharLen;
-                        dataPos += 4 + varcharLen;
+                        int fieldBytes = INT_BYTES + varcharLen;
+                        memmove(recoStart + currFieldOffset, static_cast<const char *>(data) + dataPos, fieldBytes);
+                        currFieldOffset += fieldBytes;
+                        dataPos += fieldBytes;
                     }
                 }
             }
         }
     }
 
-    unsigned short RecordBasedFileManager::putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, unsigned short recordSpace) {
-        unsigned short initFreeSpace = PAGE_SIZE - recordSpace - 4;  // 4 bytes, 2 for N value, 2 for F value
-        char * firstByte = (char *)pageData;
-        memcpy(firstByte + (PAGE_SIZE - 2), &initFreeSpace, 2);  // adds F value for free space
-        unsigned short N = 1;
-        memcpy(firstByte + (PAGE_SIZE - 4), &N, 2);  // adds N value for number of records
+    SizeType RecordBasedFileManager::putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace) {
+        SizeType initFreeSpace = PAGE_SIZE - recordSpace - BYTES_FOR_PAGE_STATS;  // bytes for N value and F value
+        char * firstByte = static_cast<char *>(pageData);
+        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_FREE_SPACE), &initFreeSpace, BYTES_FOR_PAGE_FREE_SPACE);  // adds F value for free space
+        SizeType N = 1;
+        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS), &N, BYTES_FOR_PAGE_SLOT_COUNT);  // adds N value for number of records
 
         // create record directory entry for new record
-        unsigned short offset = 0;
-        unsigned short length = recordSpace - 4;
-        memcpy(firstByte + (PAGE_SIZE - 6), &length, 2);
-        memcpy(firstByte + (PAGE_SIZE - 8), &offset, 2);
+        SizeType offset = 0;
+        SizeType length = recordSpace - BYTES_FOR_SLOT_DIR_ENTRY;
+        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_LENGTH), &length, BYTES_FOR_SLOT_DIR_LENGTH);
+        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY), &offset, BYTES_FOR_SLOT_DIR_OFFSET);
 
         // record itself is placed into page
         embedRecord(offset, recordDescriptor, data, pageData);
         return 1;
     }
 
-    unsigned short RecordBasedFileManager::putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, unsigned short recordSpace) {
-        char * firstByte = (char *)pageData;
+    SizeType RecordBasedFileManager::putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace) {
+        char * firstByte = static_cast<char *>(pageData);
 
         // get current free space value, update it, then write it back
-        unsigned short freeSpace;
-        memcpy(&freeSpace, firstByte + (PAGE_SIZE - 2), 2);
+        SizeType freeSpace;
+        memmove(&freeSpace, firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_FREE_SPACE), BYTES_FOR_PAGE_FREE_SPACE);
         freeSpace -= recordSpace;
-        memcpy(firstByte + (PAGE_SIZE - 2), &freeSpace, 2);  // adds F value for free space
+        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_FREE_SPACE), &freeSpace, BYTES_FOR_PAGE_FREE_SPACE);  // adds F value for free space
 
         // get current N value, increase by 1, write it back
-        unsigned short N;
-        memcpy(&N, firstByte + (PAGE_SIZE - 4), 2);
+        SizeType N;
+        memmove(&N, firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS), BYTES_FOR_PAGE_SLOT_COUNT);
         ++N;
-        memcpy(firstByte + (PAGE_SIZE - 4), &N, 2);
+        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS), &N, BYTES_FOR_PAGE_SLOT_COUNT);
 
         // calculate the offset that this new record will have into the page using last record's values
-        unsigned short offset;
+        SizeType offset;
         if (N == 1)
             offset = 0;
         else {
-            memcpy(&offset, firstByte + (PAGE_SIZE - 4 - 4 * (N - 1)), 2);
-            unsigned short len;
-            memcpy(&len, firstByte + (PAGE_SIZE - 4 - 4 * (N - 1) + 2), 2);
+            memmove(&offset, firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * (N - 1)), BYTES_FOR_SLOT_DIR_OFFSET);
+            SizeType len;
+            memmove(&len, firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * (N - 1) + BYTES_FOR_SLOT_DIR_OFFSET), BYTES_FOR_SLOT_DIR_LENGTH);
             offset += len;
         }
 
         // create record directory entry for new record
-        unsigned short length = recordSpace - 4;
-        memcpy(firstByte + (PAGE_SIZE - 4 - 4 * N + 2), &length, 2);
-        memcpy(firstByte + (PAGE_SIZE - 4 - 4 * N), &offset, 2);
+        SizeType length = recordSpace - BYTES_FOR_SLOT_DIR_ENTRY;
+        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * N + BYTES_FOR_SLOT_DIR_OFFSET), &length, BYTES_FOR_SLOT_DIR_LENGTH);
+        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * N), &offset, BYTES_FOR_SLOT_DIR_OFFSET);
 
         // record itself is placed into page, N is the returned slot number
         embedRecord(offset, recordDescriptor, data, pageData);
@@ -172,27 +191,27 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::insertRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                             const void *data, RID &rid) {
-        void * pageData = malloc(PAGE_SIZE);
+        char * pageData = new char[PAGE_SIZE];
         memset(pageData, 0, PAGE_SIZE);
         unsigned pageNum;  // page which record will be inserted to, starts with last page
-        unsigned freeIndex = PAGE_SIZE / sizeof(unsigned short) - 1;
-        unsigned short recordSpace = calcRecordSpace(recordDescriptor, data);
-        unsigned short slotNum;
+        unsigned freeIndex = PAGE_SIZE / sizeof(SizeType) - 1;
+        SizeType recordSpace = calcRecordSpace(recordDescriptor, data);
+        SizeType slotNum;
 
         if (fileHandle.pageCount == 0) {
             pageNum = 0;  // no need to check pages
             slotNum = putRecordInEmptyPage(recordDescriptor, data, pageData, recordSpace);
         } else {
-            unsigned short freeSpace;
+            SizeType freeSpace;
             pageNum = fileHandle.pageCount - 1;
             if (fileHandle.readPage(pageNum, pageData) == -1) {free(pageData); return -1;}
-            freeSpace = ((unsigned short *)pageData)[freeIndex];
+            freeSpace = static_cast<SizeType *>(pageData)[freeIndex];
 
             // if not enough space, need to start iterating through other pages
             if (recordSpace > freeSpace) {
                 for (pageNum = 0; pageNum < fileHandle.pageCount - 1; ++pageNum) {
                     if (fileHandle.readPage(pageNum, pageData) == -1) {free(pageData); return -1;}
-                    freeSpace = ((unsigned short *)pageData)[freeIndex];
+                    freeSpace = static_cast<SizeType *>(pageData)[freeIndex];
                     if (recordSpace <= freeSpace) break;  // stop searching if enough space
                 }
 
@@ -227,24 +246,24 @@ namespace PeterDB {
         if (fileHandle.readPage(rid.pageNum, pageData) == -1) {free(pageData); return -1;}
 
         // pull offset and length of record from on-page directory
-        unsigned short recoOffset;
-        memcpy(&recoOffset, (const char *)pageData + (PAGE_SIZE - 4 - 4 * rid.slotNum), 2);
-        unsigned short recoLen;
-        memcpy(&recoLen, (const char *)pageData + (PAGE_SIZE - 4 - 4 * rid.slotNum + 2), 2);
+        SizeType recoOffset;
+        memmove(&recoOffset, static_cast<const char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * rid.slotNum), BYTES_FOR_SLOT_DIR_OFFSET);
+        SizeType recoLen;
+        memmove(&recoLen, static_cast<const char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * rid.slotNum + BYTES_FOR_SLOT_DIR_OFFSET), BYTES_FOR_SLOT_DIR_LENGTH);
 
-        const char * recoStart = (const char *)pageData + recoOffset;
-        unsigned short bytesFromStart = 2;  // start looking after the initial 2-byte len number
+        const char * recoStart = static_cast<const char *>(pageData) + recoOffset;
+        SizeType bytesFromStart = BYTES_FOR_RECORD_FIELD_COUNT;  // start looking after the initial 2-byte len number
 
         // calculate number of null flag bytes, copy those bytes from the record
-        unsigned nullFlagBytes = recordDescriptor.size() / 8;
-        if (recordDescriptor.size() % 8 != 0) ++nullFlagBytes;
-        memcpy(data, recoStart + bytesFromStart, nullFlagBytes);
-        data = (char *)data + nullFlagBytes;
+        SizeType nullFlagBytes = nullBytesNeeded(recordDescriptor.size());
+        memmove(data, recoStart + bytesFromStart, nullFlagBytes);
+        data = static_cast<char *>(data) + nullFlagBytes;
+
         // now skip over the null bytes and all the directory bytes
-        bytesFromStart += nullFlagBytes + 2 * recordDescriptor.size();
+        bytesFromStart += nullFlagBytes + BYTES_FOR_POINTER_TO_RECORD_FIELD * recordDescriptor.size();
 
         // copy rest of record into data variable
-        memcpy(data, recoStart + bytesFromStart, recoLen - bytesFromStart);
+        memmove(data, recoStart + bytesFromStart, recoLen - bytesFromStart);
         free(pageData);
         return 0;
     }
@@ -257,48 +276,49 @@ namespace PeterDB {
     RC RecordBasedFileManager::printRecord(const std::vector<Attribute> &recordDescriptor, const void *data,
                                            std::ostream &out) {
         // calculate number of bytes for null flags
-        unsigned nullFlagBytes = recordDescriptor.size() / 8;
-        if (recordDescriptor.size() % 8 != 0) ++nullFlagBytes;
+        SizeType nullFlagBytes = nullBytesNeeded(recordDescriptor.size());
 
         // skip over null flag bytes to get to useful data
-        const char * dataPos = (const char *)data + nullFlagBytes;
+        const char * dataPos = static_cast<const char *>(data) + nullFlagBytes;
         int fieldsRemaining = recordDescriptor.size();
 
         // attribute variables for saving attribute information in the loops
         Attribute attr;
-        unsigned short attrNum = 0;
+        SizeType attrNum = 0;
 
         unsigned char flagByte;
-        for (unsigned i = 0; i < nullFlagBytes; ++i, fieldsRemaining -= 8) {
-            memcpy(&flagByte, (const char *)data + i, 1);
+        for (SizeType i = 0; i < nullFlagBytes; ++i, fieldsRemaining -= BITS_IN_BYTE) {
+            memmove(&flagByte, static_cast<const char *>(data) + i, 1);
 
-            for (unsigned j = 0; j < 8 && j < fieldsRemaining; ++j) {
-                attrNum = i * 8 + j;
+            for (int j = 1; j <= BITS_IN_BYTE && j <= fieldsRemaining; ++j) {
+                attrNum = i * BITS_IN_BYTE + j - 1;
                 attr = recordDescriptor[attrNum];
                 out << attr.name << ": ";
 
-                if (((flagByte >> (7 - j)) & 1) == 0) {
+                if (!nullBitOn(flagByte, j)) {
                     // null bit flag of zero means non-null
                     if (attr.type == TypeInt) {
                         int val;
-                        memcpy(&val, dataPos, attr.length);
+                        memmove(&val, dataPos, attr.length);
                         out << val;
                         dataPos += attr.length;
                     } else if (attr.type == TypeReal) {
                         float val;
-                        memcpy(&val, dataPos, attr.length);
+                        memmove(&val, dataPos, attr.length);
                         out << val;
                         dataPos += attr.length;
                     } else {
-                        // must get 4-byte length value from varchar field to know needed space
-                        unsigned varcharLen = 0;
-                        memcpy(&varcharLen, dataPos, 4);
-                        dataPos += 4;
-                        char val[varcharLen + 1];
-                        memcpy(val, dataPos, varcharLen);
+                        // must get length value from varchar field to know needed space
+                        int varcharLen = 0;
+                        memmove(&varcharLen, dataPos, INT_BYTES);
+                        dataPos += INT_BYTES;
+
+                        char * val = new char[varcharLen + 1];
+                        memmove(val, dataPos, varcharLen);
                         val[varcharLen] = '\0';
                         out << val;
                         dataPos += varcharLen;
+                        delete[] val;
                     }
                 } else {
                     // null value for attribute
