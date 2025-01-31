@@ -6,6 +6,8 @@
 #include "pfm.h"
 
 namespace PeterDB {
+    using SizeType = unsigned short;
+
     // Record ID
     typedef struct {
         unsigned pageNum;           // page number
@@ -139,11 +141,21 @@ namespace PeterDB {
         RecordBasedFileManager(const RecordBasedFileManager &);                     // Prevent construction by copying
         RecordBasedFileManager &operator=(const RecordBasedFileManager &);          // Prevent assignment
 
+        SizeType nullBytesNeeded(SizeType numFields);
+        bool nullBitOn(unsigned char nullByte, int bitNum);
         // helper functions for insertRecord method
-        unsigned short calcRecordSpace(const std::vector<Attribute> &recordDescriptor, const void * data);
-        unsigned short putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, unsigned short recordSpace);
-        unsigned short putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, unsigned short recordSpace);
-        void embedRecord(unsigned short offset, const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData);
+        SizeType calcRecordSpace(const std::vector<Attribute> &recordDescriptor, const void * data);
+        SizeType putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace);
+        SizeType putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace);
+        void embedRecord(SizeType offset, const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData);
+        void getFreeSpace(SizeType * freeSpace, const void * pageData);
+        void getSlotCount(SizeType * slotCount, const void * pageData);
+        void setFreeSpace(SizeType * freeSpace, void * pageData);
+        void setSlotCount(SizeType * slotCount, void * pageData);
+        void getFreeSpaceAndSlotCount(SizeType * freeSpace, SizeType * slotCount, const void * pageData);
+        void setFreeSpaceAndSlotCount(SizeType * freeSpace, SizeType * slotCount, void * pageData);
+        SizeType assignSlot(const void * pageData);
+
     };
 
 } // namespace PeterDB
