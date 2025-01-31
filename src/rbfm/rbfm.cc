@@ -54,6 +54,70 @@ namespace PeterDB {
         return (1 & (nullByte >> (BITS_IN_BYTE - bitNum))) == 1;
     }
 
+    void RecordBasedFileManager::getFreeSpace(SizeType * freeSpace, const void * pageData) {
+        memmove(freeSpace, static_cast<const char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_FREE_SPACE), BYTES_FOR_PAGE_FREE_SPACE);
+    }
+
+    void RecordBasedFileManager::setFreeSpace(SizeType * freeSpace, void * pageData) {
+        memmove(static_cast<char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_FREE_SPACE), freeSpace, BYTES_FOR_PAGE_FREE_SPACE);
+    }
+
+    void RecordBasedFileManager::getSlotCount(SizeType * slotCount, const void * pageData) {
+        memmove(slotCount, static_cast<const char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS), BYTES_FOR_PAGE_SLOT_COUNT);
+    }
+
+    void RecordBasedFileManager::setSlotCount(SizeType * slotCount, void * pageData) {
+        memmove(static_cast<char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS), slotCount, BYTES_FOR_PAGE_SLOT_COUNT);
+    }
+
+    void RecordBasedFileManager::getFreeSpaceAndSlotCount(SizeType * freeSpace, SizeType * slotCount, const void * pageData) {
+        memmove(freeSpace, static_cast<const char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_FREE_SPACE), BYTES_FOR_PAGE_FREE_SPACE);
+        memmove(slotCount, static_cast<const char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS), BYTES_FOR_PAGE_SLOT_COUNT);
+    }
+
+    void RecordBasedFileManager::setFreeSpaceAndSlotCount(SizeType * freeSpace, SizeType * slotCount, void * pageData) {
+        memmove(static_cast<char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_FREE_SPACE), freeSpace, BYTES_FOR_PAGE_FREE_SPACE);
+        memmove(static_cast<char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS), slotCount, BYTES_FOR_PAGE_SLOT_COUNT);
+    }
+
+    void RecordBasedFileManager::getSlotOffset(SizeType * offset, SizeType slotNum, const void * pageData) {
+        memmove(offset, static_cast<const char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * slotNum), BYTES_FOR_SLOT_DIR_OFFSET);
+    }
+
+    void RecordBasedFileManager::setSlotOffset(SizeType * offset, SizeType slotNum, void * pageData) {
+        memmove(static_cast<char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * slotNum), offset, BYTES_FOR_SLOT_DIR_OFFSET);
+    }
+
+    void RecordBasedFileManager::getSlotLen(SizeType * len, SizeType slotNum, const void * pageData) {
+        memmove(len, static_cast<const char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * slotNum + BYTES_FOR_SLOT_DIR_OFFSET), BYTES_FOR_SLOT_DIR_LENGTH);
+    }
+
+    void RecordBasedFileManager::setSlotLen(SizeType * len, SizeType slotNum, void * pageData) {
+        memmove(static_cast<char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * slotNum + BYTES_FOR_SLOT_DIR_OFFSET), len, BYTES_FOR_SLOT_DIR_LENGTH);
+    }
+
+    void RecordBasedFileManager::getSlotOffsetAndLen(SizeType * offset, SizeType * len, SizeType slotNum, const void * pageData) {
+        memmove(offset, static_cast<const char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * slotNum), BYTES_FOR_SLOT_DIR_OFFSET);
+        memmove(len, static_cast<const char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * slotNum + BYTES_FOR_SLOT_DIR_OFFSET), BYTES_FOR_SLOT_DIR_LENGTH);
+    }
+
+    void RecordBasedFileManager::setSlotOffsetAndLen(SizeType * offset, SizeType * len, SizeType slotNum, void * pageData) {
+        memmove(static_cast<char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * slotNum), offset, BYTES_FOR_SLOT_DIR_OFFSET);
+        memmove(static_cast<char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * slotNum + BYTES_FOR_SLOT_DIR_OFFSET), len, BYTES_FOR_SLOT_DIR_LENGTH);
+    }
+
+    SizeType RecordBasedFileManager::assignSlot(const void * pageData) {
+        SizeType slotCount;
+        getSlotCount(&slotCount, pageData);
+
+        for (SizeType slot = 1, len; slot <= slotCount; ++slot) {
+            getSlotLen(&len, slot, pageData);
+            if (len == 0) return slot;
+        }
+
+        return slotCount + 1;
+    }
+
     SizeType RecordBasedFileManager::calcRecordSpace(const std::vector<Attribute> &recordDescriptor, const void * data) {
         // need bytes for record directory entry, for offset and length
         // need more for number of fields
@@ -205,13 +269,13 @@ namespace PeterDB {
             SizeType freeSpace;
             pageNum = fileHandle.pageCount - 1;
             if (fileHandle.readPage(pageNum, pageData) == -1) {free(pageData); return -1;}
-            freeSpace = static_cast<SizeType *>(pageData)[freeIndex];
+            getFreeSpace(&freeSpace, pageData);
 
             // if not enough space, need to start iterating through other pages
             if (recordSpace > freeSpace) {
                 for (pageNum = 0; pageNum < fileHandle.pageCount - 1; ++pageNum) {
                     if (fileHandle.readPage(pageNum, pageData) == -1) {free(pageData); return -1;}
-                    freeSpace = static_cast<SizeType *>(pageData)[freeIndex];
+                    getFreeSpace(&freeSpace, pageData);
                     if (recordSpace <= freeSpace) break;  // stop searching if enough space
                 }
 
