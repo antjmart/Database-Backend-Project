@@ -154,6 +154,12 @@ namespace PeterDB {
         void setSlotCount(SizeType * slotCount, void * pageData);
         void getFreeSpaceAndSlotCount(SizeType * freeSpace, SizeType * slotCount, const void * pageData);
         void setFreeSpaceAndSlotCount(SizeType * freeSpace, SizeType * slotCount, void * pageData);
+        void getSlotOffset(SizeType * offset, SizeType slotNum, const void * pageData);
+        void setSlotOffset(SizeType * offset, SizeType slotNum, void * pageData);
+        void getSlotLen(SizeType * len, SizeType slotNum, const void * pageData);
+        void setSlotLen(SizeType * len, SizeType slotNum, void * pageData);
+        void getSlotOffsetAndLen(SizeType * offset, SizeType * len, SizeType slotNum, const void * pageData);
+        void setSlotOffsetAndLen(SizeType * offset, SizeType * len, SizeType slotNum, void * pageData);
         SizeType assignSlot(const void * pageData);
 
     };
