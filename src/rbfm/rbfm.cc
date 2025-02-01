@@ -12,7 +12,7 @@ constexpr PeterDB::SizeType BYTES_FOR_POINTER_TO_RECORD_FIELD = 2;
 constexpr PeterDB::SizeType BYTES_FOR_PAGE_SLOT_COUNT = 2;
 constexpr PeterDB::SizeType BYTES_FOR_PAGE_FREE_SPACE = 2;
 constexpr PeterDB::SizeType BYTES_FOR_PAGE_STATS = BYTES_FOR_PAGE_SLOT_COUNT + BYTES_FOR_PAGE_FREE_SPACE;
-
+constexpr PeterDB::SizeType TOMBSTONE_BYTE = 1;
 
 namespace PeterDB {
     RecordBasedFileManager &RecordBasedFileManager::instance() {
@@ -118,10 +118,25 @@ namespace PeterDB {
         return slotCount + 1;
     }
 
+    bool RecordBasedFileManager::fitsOnPage(SizeType recordSpace, const void * pageData) {
+        // get this page's free space value
+        SizeType freeSpace;
+        getFreeSpace(&freeSpace, pageData);
+
+        // fitsOnPage is true when there's enough free space, false when there's not even enough space for bare record
+        if (recordSpace <= freeSpace) return true;
+        if (recordSpace - BYTES_FOR_SLOT_DIR_ENTRY > freeSpace) return false;
+
+        SizeType slotsOnPage;
+        getSlotCount(&slotsOnPage, pageData);
+        // if a slot can be reused to save slot dir entry bytes, then record will fit on page
+        return assignSlot(pageData) <= slotsOnPage;
+    }
+
     SizeType RecordBasedFileManager::calcRecordSpace(const std::vector<Attribute> &recordDescriptor, const void * data) {
         // need bytes for record directory entry, for offset and length
-        // need more for number of fields
-        SizeType recordSpace = BYTES_FOR_SLOT_DIR_ENTRY + BYTES_FOR_RECORD_FIELD_COUNT;
+        // need more for number of fields, and byte for tombstone check
+        SizeType recordSpace = BYTES_FOR_SLOT_DIR_ENTRY + BYTES_FOR_RECORD_FIELD_COUNT + TOMBSTONE_BYTE;
         SizeType nullFlagBytes = nullBytesNeeded(recordDescriptor.size());
         recordSpace += nullFlagBytes;
 
@@ -159,12 +174,14 @@ namespace PeterDB {
         SizeType numFields = recordDescriptor.size();  // number of fields
         SizeType nullFlagBytes = nullBytesNeeded(numFields);  // number of bytes used for the null flags
 
+        memset(recoPos, 0, TOMBSTONE_BYTE);  // set tombstone byte to zero
+        ++recoPos;
         memmove(recoPos, &numFields, BYTES_FOR_RECORD_FIELD_COUNT);  // first put number of fields
         recoPos += BYTES_FOR_RECORD_FIELD_COUNT;
         memmove(recoPos, data, nullFlagBytes);  // get null flag bits
         recoPos += nullFlagBytes;
 
-        SizeType currFieldOffset = BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytes + BYTES_FOR_POINTER_TO_RECORD_FIELD * numFields;  // field offsets go from record start
+        SizeType currFieldOffset = TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytes + BYTES_FOR_POINTER_TO_RECORD_FIELD * numFields;  // field offsets go from record start
         int fieldsRemaining = numFields;
         SizeType dataPos = nullFlagBytes;  // this keeps track of how far into data byte stream to be
         unsigned char flagByte;
@@ -215,35 +232,29 @@ namespace PeterDB {
     }
 
     SizeType RecordBasedFileManager::putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace) {
-        // get current free space value, update it, then write it back
-        SizeType freeSpace;
-        getFreeSpace(&freeSpace, pageData);
-        freeSpace -= recordSpace;
-        setFreeSpace(&freeSpace, pageData);  // adds F value for free space
+        // get current free space value and N value
+        SizeType freeSpace, N;
+        getFreeSpaceAndSlotCount(&freeSpace, &N, pageData);
 
-        // get current N value, increase by 1, write it back
-        SizeType N;
-        getSlotCount(&N, pageData);
-        ++N;
-        setSlotCount(&N, pageData);
-
-        // calculate the offset that this new record will have into the page using last record's values
-        SizeType offset;
-        if (N == 1)
-            offset = 0;
-        else {
-            SizeType len;
-            getSlotOffsetAndLen(&offset, &len, N - 1, pageData);
-            offset += len;
-        }
-
+        // determine the slot number for this new record
+        SizeType assignedSlot = assignSlot(pageData);
+        // calculate the offset that this new record will have into the page using arithmetic with free space
+        SizeType offset = PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * N - freeSpace;
         // create record directory entry for new record
         SizeType length = recordSpace - BYTES_FOR_SLOT_DIR_ENTRY;
-        setSlotOffsetAndLen(&offset, &length, N, pageData);
+        setSlotOffsetAndLen(&offset, &length, assignedSlot, pageData);
 
-        // record itself is placed into page, N is the returned slot number
+        // update free space and N, check if a new slot is made, or reusing a slot
+        if (assignedSlot > N) {
+            ++N;
+            freeSpace -= recordSpace;
+        } else
+            freeSpace -= recordSpace - BYTES_FOR_SLOT_DIR_ENTRY;
+        setFreeSpaceAndSlotCount(&freeSpace, &N, pageData);
+
+        // record itself is placed into page, return slot number
         embedRecord(offset, recordDescriptor, data, pageData);
-        return N;
+        return assignedSlot;
     }
 
     RC RecordBasedFileManager::insertRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
@@ -258,17 +269,14 @@ namespace PeterDB {
             pageNum = 0;  // no need to check pages
             slotNum = putRecordInEmptyPage(recordDescriptor, data, pageData, recordSpace);
         } else {
-            SizeType freeSpace;
             pageNum = fileHandle.pageCount - 1;
             if (fileHandle.readPage(pageNum, pageData) == -1) {delete[] pageData; return -1;}
-            getFreeSpace(&freeSpace, pageData);
 
             // if not enough space, need to start iterating through other pages
-            if (recordSpace > freeSpace) {
+            if (!fitsOnPage(recordSpace, pageData)) {
                 for (pageNum = 0; pageNum < fileHandle.pageCount - 1; ++pageNum) {
                     if (fileHandle.readPage(pageNum, pageData) == -1) {delete[] pageData; return -1;}
-                    getFreeSpace(&freeSpace, pageData);
-                    if (recordSpace <= freeSpace) break;  // stop searching if enough space
+                    if (fitsOnPage(recordSpace, pageData)) break;  // stop searching if enough space
                 }
 
                 if (pageNum == fileHandle.pageCount - 1) {
