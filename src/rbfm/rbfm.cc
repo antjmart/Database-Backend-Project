@@ -5,7 +5,7 @@
 constexpr PeterDB::SizeType BYTES_FOR_SLOT_DIR_OFFSET = 2;
 constexpr PeterDB::SizeType BYTES_FOR_SLOT_DIR_LENGTH = 2;
 constexpr PeterDB::SizeType BYTES_FOR_SLOT_DIR_ENTRY = BYTES_FOR_SLOT_DIR_LENGTH + BYTES_FOR_SLOT_DIR_OFFSET;
-constexpr PeterDB::SizeType BYTES_FOR_RECORD_FIELD_COUNT = 2;
+constexpr PeterDB::SizeType BYTES_FOR_RECORD_FIELD_COUNT = 4;
 constexpr int INT_BYTES = 4;
 constexpr int BITS_IN_BYTE = 8;
 constexpr PeterDB::SizeType BYTES_FOR_POINTER_TO_RECORD_FIELD = 2;
@@ -13,6 +13,8 @@ constexpr PeterDB::SizeType BYTES_FOR_PAGE_SLOT_COUNT = 2;
 constexpr PeterDB::SizeType BYTES_FOR_PAGE_FREE_SPACE = 2;
 constexpr PeterDB::SizeType BYTES_FOR_PAGE_STATS = BYTES_FOR_PAGE_SLOT_COUNT + BYTES_FOR_PAGE_FREE_SPACE;
 constexpr PeterDB::SizeType TOMBSTONE_BYTE = 1;
+constexpr PeterDB::SizeType BYTES_FOR_PAGE_NUM = 4;
+constexpr PeterDB::SizeType BYTES_FOR_SLOT_NUM = 2;
 
 namespace PeterDB {
     RecordBasedFileManager &RecordBasedFileManager::instance() {
@@ -307,14 +309,27 @@ namespace PeterDB {
     RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                           const RID &rid, void *data) {
         char * pageData = new char[PAGE_SIZE];
-        if (fileHandle.readPage(rid.pageNum, pageData) == -1) {delete[] pageData; return -1;}
-
-        // pull offset and length of record from on-page directory
+        unsigned pageNum = rid.pageNum;
+        unsigned short slotNum = rid.slotNum;
         SizeType recoOffset, recoLen;
-        getSlotOffsetAndLen(&recoOffset, &recoLen, rid.slotNum, pageData);
+        const char * recoStart;
+        unsigned char tombstoneCheck;
 
-        const char * recoStart = pageData + recoOffset;
-        SizeType bytesFromStart = BYTES_FOR_RECORD_FIELD_COUNT;  // start looking after the initial 2-byte len number
+        // keeps looping through linked pages until the actual, non-tombstone record is found
+        while (true) {
+            if (fileHandle.readPage(pageNum, pageData) == -1) {delete[] pageData; return -1;}
+            // pull offset and length of record from on-page directory
+            getSlotOffsetAndLen(&recoOffset, &recoLen, slotNum, pageData);
+            recoStart = pageData + recoOffset;
+            memmove(&tombstoneCheck, recoStart, TOMBSTONE_BYTE);
+
+            if (tombstoneCheck == 0) break;
+
+            memmove(&pageNum, recoStart + TOMBSTONE_BYTE, BYTES_FOR_PAGE_NUM);
+            memmove(&slotNum, recoStart + TOMBSTONE_BYTE + BYTES_FOR_PAGE_NUM, BYTES_FOR_SLOT_NUM);
+        }
+
+        SizeType bytesFromStart = TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT;  // start looking after the initial values
 
         // calculate number of null flag bytes, copy those bytes from the record
         SizeType nullFlagBytes = nullBytesNeeded(recordDescriptor.size());
