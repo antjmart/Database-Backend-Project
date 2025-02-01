@@ -201,16 +201,13 @@ namespace PeterDB {
 
     SizeType RecordBasedFileManager::putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace) {
         SizeType initFreeSpace = PAGE_SIZE - recordSpace - BYTES_FOR_PAGE_STATS;  // bytes for N value and F value
-        char * firstByte = static_cast<char *>(pageData);
-        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_FREE_SPACE), &initFreeSpace, BYTES_FOR_PAGE_FREE_SPACE);  // adds F value for free space
         SizeType N = 1;
-        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS), &N, BYTES_FOR_PAGE_SLOT_COUNT);  // adds N value for number of records
+        setFreeSpaceAndSlotCount(&initFreeSpace, &N, pageData);  // adds N value for number of records, F value for free space
 
         // create record directory entry for new record
         SizeType offset = 0;
         SizeType length = recordSpace - BYTES_FOR_SLOT_DIR_ENTRY;
-        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_LENGTH), &length, BYTES_FOR_SLOT_DIR_LENGTH);
-        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY), &offset, BYTES_FOR_SLOT_DIR_OFFSET);
+        setSlotOffsetAndLen(&offset, &length, 1, pageData);
 
         // record itself is placed into page
         embedRecord(offset, recordDescriptor, data, pageData);
@@ -218,35 +215,31 @@ namespace PeterDB {
     }
 
     SizeType RecordBasedFileManager::putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace) {
-        char * firstByte = static_cast<char *>(pageData);
-
         // get current free space value, update it, then write it back
         SizeType freeSpace;
-        memmove(&freeSpace, firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_FREE_SPACE), BYTES_FOR_PAGE_FREE_SPACE);
+        getFreeSpace(&freeSpace, pageData);
         freeSpace -= recordSpace;
-        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_FREE_SPACE), &freeSpace, BYTES_FOR_PAGE_FREE_SPACE);  // adds F value for free space
+        setFreeSpace(&freeSpace, pageData);  // adds F value for free space
 
         // get current N value, increase by 1, write it back
         SizeType N;
-        memmove(&N, firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS), BYTES_FOR_PAGE_SLOT_COUNT);
+        getSlotCount(&N, pageData);
         ++N;
-        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS), &N, BYTES_FOR_PAGE_SLOT_COUNT);
+        setSlotCount(&N, pageData);
 
         // calculate the offset that this new record will have into the page using last record's values
         SizeType offset;
         if (N == 1)
             offset = 0;
         else {
-            memmove(&offset, firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * (N - 1)), BYTES_FOR_SLOT_DIR_OFFSET);
             SizeType len;
-            memmove(&len, firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * (N - 1) + BYTES_FOR_SLOT_DIR_OFFSET), BYTES_FOR_SLOT_DIR_LENGTH);
+            getSlotOffsetAndLen(&offset, &len, N - 1, pageData);
             offset += len;
         }
 
         // create record directory entry for new record
         SizeType length = recordSpace - BYTES_FOR_SLOT_DIR_ENTRY;
-        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * N + BYTES_FOR_SLOT_DIR_OFFSET), &length, BYTES_FOR_SLOT_DIR_LENGTH);
-        memmove(firstByte + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * N), &offset, BYTES_FOR_SLOT_DIR_OFFSET);
+        setSlotOffsetAndLen(&offset, &length, N, pageData);
 
         // record itself is placed into page, N is the returned slot number
         embedRecord(offset, recordDescriptor, data, pageData);
@@ -258,7 +251,6 @@ namespace PeterDB {
         char * pageData = new char[PAGE_SIZE];
         memset(pageData, 0, PAGE_SIZE);
         unsigned pageNum;  // page which record will be inserted to, starts with last page
-        unsigned freeIndex = PAGE_SIZE / sizeof(SizeType) - 1;
         SizeType recordSpace = calcRecordSpace(recordDescriptor, data);
         SizeType slotNum;
 
@@ -268,13 +260,13 @@ namespace PeterDB {
         } else {
             SizeType freeSpace;
             pageNum = fileHandle.pageCount - 1;
-            if (fileHandle.readPage(pageNum, pageData) == -1) {free(pageData); return -1;}
+            if (fileHandle.readPage(pageNum, pageData) == -1) {delete[] pageData; return -1;}
             getFreeSpace(&freeSpace, pageData);
 
             // if not enough space, need to start iterating through other pages
             if (recordSpace > freeSpace) {
                 for (pageNum = 0; pageNum < fileHandle.pageCount - 1; ++pageNum) {
-                    if (fileHandle.readPage(pageNum, pageData) == -1) {free(pageData); return -1;}
+                    if (fileHandle.readPage(pageNum, pageData) == -1) {delete[] pageData; return -1;}
                     getFreeSpace(&freeSpace, pageData);
                     if (recordSpace <= freeSpace) break;  // stop searching if enough space
                 }
@@ -300,22 +292,20 @@ namespace PeterDB {
             writeStatus = fileHandle.appendPage(pageData);
         else
             writeStatus = fileHandle.writePage(pageNum, pageData);
-        free(pageData);
+        delete[] pageData;
         return writeStatus;
     }
 
     RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                           const RID &rid, void *data) {
-        void * pageData = malloc(PAGE_SIZE);
-        if (fileHandle.readPage(rid.pageNum, pageData) == -1) {free(pageData); return -1;}
+        char * pageData = new char[PAGE_SIZE];
+        if (fileHandle.readPage(rid.pageNum, pageData) == -1) {delete[] pageData; return -1;}
 
         // pull offset and length of record from on-page directory
-        SizeType recoOffset;
-        memmove(&recoOffset, static_cast<const char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * rid.slotNum), BYTES_FOR_SLOT_DIR_OFFSET);
-        SizeType recoLen;
-        memmove(&recoLen, static_cast<const char *>(pageData) + (PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY * rid.slotNum + BYTES_FOR_SLOT_DIR_OFFSET), BYTES_FOR_SLOT_DIR_LENGTH);
+        SizeType recoOffset, recoLen;
+        getSlotOffsetAndLen(&recoOffset, &recoLen, rid.slotNum, pageData);
 
-        const char * recoStart = static_cast<const char *>(pageData) + recoOffset;
+        const char * recoStart = pageData + recoOffset;
         SizeType bytesFromStart = BYTES_FOR_RECORD_FIELD_COUNT;  // start looking after the initial 2-byte len number
 
         // calculate number of null flag bytes, copy those bytes from the record
@@ -328,7 +318,7 @@ namespace PeterDB {
 
         // copy rest of record into data variable
         memmove(data, recoStart + bytesFromStart, recoLen - bytesFromStart);
-        free(pageData);
+        delete[] pageData;
         return 0;
     }
 
