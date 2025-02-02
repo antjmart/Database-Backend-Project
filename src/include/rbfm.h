@@ -162,6 +162,8 @@ namespace PeterDB {
         void setSlotOffsetAndLen(SizeType * offset, SizeType * len, SizeType slotNum, void * pageData);
         SizeType assignSlot(const void * pageData);
         bool fitsOnPage(SizeType recordSpace, const void * pageData);
+        void shiftRecordsLeft(SizeType shiftPoint, SizeType shiftDistance, void * pageData);
+        void shiftRecordsRight(SizeType shiftPoint, SizeType shiftDistance, void * pageData);
     };
 
 } // namespace PeterDB
