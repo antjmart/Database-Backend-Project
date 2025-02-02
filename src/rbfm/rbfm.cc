@@ -15,6 +15,8 @@ constexpr PeterDB::SizeType BYTES_FOR_PAGE_STATS = BYTES_FOR_PAGE_SLOT_COUNT + B
 constexpr PeterDB::SizeType TOMBSTONE_BYTE = 1;
 constexpr PeterDB::SizeType BYTES_FOR_PAGE_NUM = 4;
 constexpr PeterDB::SizeType BYTES_FOR_SLOT_NUM = 2;
+constexpr PeterDB::SizeType BYTES_FOR_TOMBSTONE_RECORD = TOMBSTONE_BYTE + BYTES_FOR_PAGE_NUM + BYTES_FOR_SLOT_NUM;
+
 
 namespace PeterDB {
     RecordBasedFileManager &RecordBasedFileManager::instance() {
@@ -173,7 +175,7 @@ namespace PeterDB {
     void RecordBasedFileManager::embedRecord(SizeType offset, const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData) {
         char * recoStart = static_cast<char *>(pageData) + offset;
         char * recoPos = recoStart;  // starting position of record entry in pageData
-        SizeType numFields = recordDescriptor.size();  // number of fields
+        unsigned numFields = recordDescriptor.size();  // number of fields
         SizeType nullFlagBytes = nullBytesNeeded(numFields);  // number of bytes used for the null flags
 
         memset(recoPos, 0, TOMBSTONE_BYTE);  // set tombstone byte to zero
@@ -184,7 +186,7 @@ namespace PeterDB {
         recoPos += nullFlagBytes;
 
         SizeType currFieldOffset = TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytes + BYTES_FOR_POINTER_TO_RECORD_FIELD * numFields;  // field offsets go from record start
-        int fieldsRemaining = numFields;
+        long fieldsRemaining = numFields;
         SizeType dataPos = nullFlagBytes;  // this keeps track of how far into data byte stream to be
         unsigned char flagByte;
         for (SizeType i = 0; i < nullFlagBytes; ++i, fieldsRemaining -= BITS_IN_BYTE) {
@@ -306,12 +308,16 @@ namespace PeterDB {
         return writeStatus;
     }
 
-    RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
-                                          const RID &rid, void *data) {
-        char * pageData = new char[PAGE_SIZE];
+    void RecordBasedFileManager::deleteTombstone(char *pageData, unsigned short slotNum, SizeType tombstoneOffset, SizeType tombstoneLen) {
+        shiftRecordsLeft(tombstoneOffset + tombstoneLen, tombstoneLen, pageData);
+        SizeType zero = 0;
+        setSlotOffsetAndLen(&zero, &zero, slotNum, pageData);
+    }
+
+    RC RecordBasedFileManager::findRealRecord(FileHandle &fileHandle, char *pageData, const RID & rid, SizeType & recoOffset, SizeType & recoLen, bool removeTombstones) {
         unsigned pageNum = rid.pageNum;
         unsigned short slotNum = rid.slotNum;
-        SizeType recoOffset, recoLen;
+        unsigned short oldSlotNum;
         const char * recoStart;
         unsigned char tombstoneCheck;
 
@@ -325,22 +331,32 @@ namespace PeterDB {
 
             if (tombstoneCheck == 0) break;
 
+            oldSlotNum = slotNum;
             memmove(&pageNum, recoStart + TOMBSTONE_BYTE, BYTES_FOR_PAGE_NUM);
             memmove(&slotNum, recoStart + TOMBSTONE_BYTE + BYTES_FOR_PAGE_NUM, BYTES_FOR_SLOT_NUM);
+            if (removeTombstones) deleteTombstone(pageData, oldSlotNum, recoOffset, recoLen);
         }
 
+        return 0;
+    }
+
+    RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
+                                          const RID &rid, void *data) {
+        char * pageData = new char[PAGE_SIZE];
+        SizeType recoOffset, recoLen;
+        if (findRealRecord(fileHandle, pageData, rid, recoOffset, recoLen, false) == -1) return -1;
         SizeType bytesFromStart = TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT;  // start looking after the initial values
 
         // calculate number of null flag bytes, copy those bytes from the record
         SizeType nullFlagBytes = nullBytesNeeded(recordDescriptor.size());
-        memmove(data, recoStart + bytesFromStart, nullFlagBytes);
+        memmove(data, pageData + recoOffset + bytesFromStart, nullFlagBytes);
         data = static_cast<char *>(data) + nullFlagBytes;
 
         // now skip over the null bytes and all the directory bytes
         bytesFromStart += nullFlagBytes + BYTES_FOR_POINTER_TO_RECORD_FIELD * recordDescriptor.size();
 
         // copy rest of record into data variable
-        memmove(data, recoStart + bytesFromStart, recoLen - bytesFromStart);
+        memmove(data, pageData + recoOffset + bytesFromStart, recoLen - bytesFromStart);
         delete[] pageData;
         return 0;
     }
@@ -410,6 +426,42 @@ namespace PeterDB {
         }
 
         return 0;
+    }
+
+    void RecordBasedFileManager::shiftRecordsLeft(SizeType shiftPoint, SizeType shiftDistance, void *pageData) {
+        SizeType slotCount, freeSpace;
+        getFreeSpaceAndSlotCount(&freeSpace, &slotCount, pageData);
+
+        for (SizeType slot = 1, offset; slot <= slotCount; ++slot) {
+            getSlotOffset(&offset, slot, pageData);
+            if (offset >= shiftPoint) {
+                offset -= shiftDistance;
+                setSlotOffset(&offset, slot, pageData);
+            }
+        }
+
+        SizeType bytesToMove = PAGE_SIZE - BYTES_FOR_PAGE_STATS - slotCount * BYTES_FOR_SLOT_DIR_ENTRY - freeSpace - shiftPoint;
+        memmove(static_cast<char *>(pageData) + (shiftPoint - shiftDistance), static_cast<const char *>(pageData) + shiftPoint, bytesToMove);
+        freeSpace += shiftDistance;
+        setFreeSpace(&freeSpace, pageData);
+    }
+
+    void RecordBasedFileManager::shiftRecordsRight(SizeType shiftPoint, SizeType shiftDistance, void *pageData) {
+        SizeType slotCount, freeSpace;
+        getFreeSpaceAndSlotCount(&freeSpace, &slotCount, pageData);
+
+        for (SizeType slot = 1, offset; slot <= slotCount; ++slot) {
+            getSlotOffset(&offset, slot, pageData);
+            if (offset >= shiftPoint) {
+                offset += shiftDistance;
+                setSlotOffset(&offset, slot, pageData);
+            }
+        }
+
+        SizeType bytesToMove = PAGE_SIZE - BYTES_FOR_PAGE_STATS - slotCount * BYTES_FOR_SLOT_DIR_ENTRY - freeSpace - shiftPoint;
+        memmove(static_cast<char *>(pageData) + (shiftPoint + shiftDistance), static_cast<const char *>(pageData) + shiftPoint, bytesToMove);
+        freeSpace -= shiftDistance;
+        setFreeSpace(&freeSpace, pageData);
     }
 
     RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
