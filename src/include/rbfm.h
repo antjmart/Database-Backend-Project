@@ -59,7 +59,10 @@ namespace PeterDB {
         std::vector<Attribute> & recordDescriptor;
         std::string conditionAttribute;
         CompOp compOp;
-        const void *value;
+        AttrType valueType;
+        int valueInt;
+        float valueReal;
+        std::string valueString;
         std::vector<std::string> & attributeNames;
         bool firstScan;
 
