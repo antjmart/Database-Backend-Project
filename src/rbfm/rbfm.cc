@@ -521,7 +521,42 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                              const RID &rid, const std::string &attributeName, void *data) {
-        return -1;
+        char pageData[PAGE_SIZE];
+        unsigned short startingSlot = rid.slotNum;
+        unsigned startingPage = rid.pageNum;
+        SizeType recoOffset, recoLen;
+        if (findRealRecord(fileHandle, pageData, startingPage, startingSlot, recoOffset, recoLen, false) == -1) return -1;
+
+        int attrIndex;
+        AttrType attrType;
+        AttrLength attrLen;
+
+        for (attrIndex = 0; attrIndex < recordDescriptor.size(); ++attrIndex) {
+            if (attributeName == recordDescriptor[attrIndex].name) {
+                attrType = recordDescriptor[attrIndex].type;
+                attrLen = recordDescriptor[attrIndex].length;
+                break;
+            }
+        }
+        if (attrIndex == recordDescriptor.size()) return -1;
+
+        SizeType nullFlagBytes = nullBytesNeeded(recordDescriptor.size());
+        unsigned char nullByte;
+        memmove(&nullByte, pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytes / BITS_IN_BYTE), 1);
+        if (nullBitOn(nullByte, nullFlagBytes % BITS_IN_BYTE)) return 0;
+        SizeType attrOffset;
+        memmove(&attrOffset, pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytes + BYTES_FOR_POINTER_TO_RECORD_FIELD * attrIndex), BYTES_FOR_POINTER_TO_RECORD_FIELD);
+        char * attrLocation = pageData + (recoOffset + attrOffset);
+
+        if (attrType == TypeVarChar) {
+            int varcharLen = 0;
+            memmove(&varcharLen, attrLocation, INT_BYTES);
+            int fieldBytes = INT_BYTES + varcharLen;
+            memmove(data, attrLocation, fieldBytes);
+        } else
+            memmove(data, attrLocation, attrLen);
+
+        return 0;
     }
 
     RC RecordBasedFileManager::scan(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
@@ -531,5 +566,12 @@ namespace PeterDB {
         return -1;
     }
 
+    void RBFM_ScanIterator::init(FileHandle & fHandle) {
+        fileHandle = fHandle;
+    }
+
+    RC RBFM_ScanIterator::close() {
+        return RecordBasedFileManager::instance().closeFile(fileHandle);
+    }
 } // namespace PeterDB
 
