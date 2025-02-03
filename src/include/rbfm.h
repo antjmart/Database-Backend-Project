@@ -2,7 +2,7 @@
 #define _rbfm_h_
 
 #include <vector>
-
+#include <unordered_set>
 #include "pfm.h"
 
 namespace PeterDB {
@@ -65,6 +65,9 @@ namespace PeterDB {
         std::string valueString;
         std::vector<std::string> & attributeNames;
         bool firstScan;
+
+        bool acceptedRecord(const char * recordData);
+        void extractRecordData(const char * recordData, void * data);
 
     public:
         RBFM_ScanIterator() = default;
@@ -148,6 +151,10 @@ namespace PeterDB {
                 const std::vector<std::string> &attributeNames, // a list of projected attributes
                 RBFM_ScanIterator &rbfm_ScanIterator);
 
+        RC findRealRecord(FileHandle &fileHandle, char *pageData, unsigned & pageNum, unsigned short & slotNum, SizeType & recoOffset, SizeType & recoLen, bool removeTombstones);
+        void getSlotCount(SizeType * slotCount, const void * pageData);
+        void getSlotOffset(SizeType * offset, SizeType slotNum, const void * pageData);
+
     protected:
         RecordBasedFileManager();                                                   // Prevent construction
         ~RecordBasedFileManager();                                                  // Prevent unwanted destruction
@@ -162,12 +169,10 @@ namespace PeterDB {
         SizeType putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace);
         void embedRecord(SizeType offset, const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData);
         void getFreeSpace(SizeType * freeSpace, const void * pageData);
-        void getSlotCount(SizeType * slotCount, const void * pageData);
         void setFreeSpace(SizeType * freeSpace, void * pageData);
         void setSlotCount(SizeType * slotCount, void * pageData);
         void getFreeSpaceAndSlotCount(SizeType * freeSpace, SizeType * slotCount, const void * pageData);
         void setFreeSpaceAndSlotCount(SizeType * freeSpace, SizeType * slotCount, void * pageData);
-        void getSlotOffset(SizeType * offset, SizeType slotNum, const void * pageData);
         void setSlotOffset(SizeType * offset, SizeType slotNum, void * pageData);
         void getSlotLen(SizeType * len, SizeType slotNum, const void * pageData);
         void setSlotLen(SizeType * len, SizeType slotNum, void * pageData);
@@ -177,7 +182,6 @@ namespace PeterDB {
         bool fitsOnPage(SizeType recordSpace, const void * pageData);
         void shiftRecordsLeft(SizeType shiftPoint, SizeType shiftDistance, void * pageData);
         void shiftRecordsRight(SizeType shiftPoint, SizeType shiftDistance, void * pageData);
-        RC findRealRecord(FileHandle &fileHandle, char *pageData, unsigned & pageNum, unsigned short & slotNum, SizeType & recoOffset, SizeType & recoLen, bool removeTombstones);
         RC deleteTombstone(FileHandle &fileHandle, char *pageData, unsigned pageNum, unsigned short slotNum, SizeType tombstoneOffset, SizeType tombstoneLen);
     };
 
