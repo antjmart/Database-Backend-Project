@@ -58,6 +58,7 @@ namespace PeterDB {
         FileHandle & fileHandle;
         std::vector<Attribute> & recordDescriptor;
         std::string conditionAttribute;
+        AttrLength conditionAttrLen;
         CompOp compOp;
         AttrType valueType;
         int valueInt;
