@@ -164,8 +164,8 @@ namespace PeterDB {
         bool fitsOnPage(SizeType recordSpace, const void * pageData);
         void shiftRecordsLeft(SizeType shiftPoint, SizeType shiftDistance, void * pageData);
         void shiftRecordsRight(SizeType shiftPoint, SizeType shiftDistance, void * pageData);
-        RC findRealRecord(FileHandle &fileHandle, char *pageData, unsigned pageNum, unsigned short & slotNum, SizeType & recoOffset, SizeType & recoLen, bool removeTombstones);
-        void deleteTombstone(char *pageData, unsigned short slotNum, SizeType tombstoneOffset, SizeType tombstoneLen);
+        RC findRealRecord(FileHandle &fileHandle, char *pageData, unsigned & pageNum, unsigned short & slotNum, SizeType & recoOffset, SizeType & recoLen, bool removeTombstones);
+        RC deleteTombstone(FileHandle &fileHandle, char *pageData, unsigned pageNum, unsigned short slotNum, SizeType tombstoneOffset, SizeType tombstoneLen);
     };
 
 } // namespace PeterDB
