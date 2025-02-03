@@ -61,6 +61,7 @@ namespace PeterDB {
         CompOp compOp;
         const void *value;
         std::vector<std::string> & attributeNames;
+        bool firstScan;
 
     public:
         RBFM_ScanIterator() = default;
