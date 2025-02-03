@@ -563,18 +563,45 @@ namespace PeterDB {
                                     const std::string &conditionAttribute, const CompOp compOp, const void *value,
                                     const std::vector<std::string> &attributeNames,
                                     RBFM_ScanIterator &rbfm_ScanIterator) {
-        return -1;
+        rbfm_ScanIterator.init(fileHandle, recordDescriptor, conditionAttribute, compOp, value, attributeNames);
+        return 0;
     }
 
     void RBFM_ScanIterator::init(FileHandle & fHandle, const std::vector<Attribute> &recordDescriptor,
                                  const std::string &conditionAttribute, const CompOp compOp, const void *value,
                                  const std::vector<std::string> &attributeNames) {
+        // initialize main variables
         fileHandle = fHandle;
         this->recordDescriptor = recordDescriptor;
         this->conditionAttribute = conditionAttribute;
         this->compOp = compOp;
-        this->value = value;
         this->attributeNames = attributeNames;
+        firstScan = true;
+
+        if (compOp == NO_OP) return;  // if no operation, comparison value is irrelevant
+        // get the type of the comparison value
+        for (auto attr : recordDescriptor) {
+            if (attr.name == conditionAttribute) {
+                valueType = attr.type;
+                break;
+            }
+        }
+
+        // if value is integer or real, simply copy over the bytes from value array
+        if (valueType == TypeInt)
+            memmove(&valueInt, value, INT_BYTES);
+        else if (valueType == TypeReal)
+            memmove(&valueReal, value, INT_BYTES);
+        else {
+            // if value is varchar, get length of the character section, append null character, then convert into string object
+            int varcharLen;
+            memmove(&varcharLen, value, INT_BYTES);
+            char * valString = new char[varcharLen + 1];
+            memmove(valString, static_cast<const char *>(value) + INT_BYTES, varcharLen);
+            valString[varcharLen] = '\0';
+            valueString = std::string{valString};
+            delete[] valString;
+        }
     }
 
     RC RBFM_ScanIterator::close() {
@@ -582,7 +609,43 @@ namespace PeterDB {
     }
 
     RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data) {
-        return -1;
+        unsigned currPageNum;
+        unsigned short currSlotNum;
+        if (firstScan) {
+            // start initial scan at zeroth page, very first slot
+            currPageNum = 0;
+            currSlotNum = 1;
+            firstScan = false;
+        } else {
+            // will iterate from the most recently used rid
+            currPageNum = rid.pageNum;
+            currSlotNum = rid.slotNum;
+        }
+
+        char pageData[PAGE_SIZE];
+        SizeType currSlotCount;
+        SizeType recoOffset;
+        unsigned char tombstoneCheck;
+
+        for (; currPageNum < fileHandle.pageCount; ++currPageNum, currSlotNum = 0) {
+            if (fileHandle.readPage(currPageNum, pageData) == -1) return -1;
+            RecordBasedFileManager::instance().getSlotCount(&currSlotCount, pageData);
+
+            for (; currSlotNum <= currSlotCount; ++currSlotNum) {
+                RecordBasedFileManager::instance().getSlotOffset(&recoOffset, currSlotNum, pageData);
+                memmove(&tombstoneCheck, pageData + recoOffset, TOMBSTONE_BYTE);
+                if (tombstoneCheck == 1) continue;
+
+                if (acceptedRecord(pageData + recoOffset)) {
+                    extractRecordData(pageData + recoOffset, data);
+                    rid.pageNum = currPageNum;
+                    rid.slotNum = currSlotNum;
+                    return 0;
+                }
+            }
+        }
+
+        return RBFM_EOF;
     }
 
 } // namespace PeterDB
