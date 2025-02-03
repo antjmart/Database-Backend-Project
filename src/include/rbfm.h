@@ -55,17 +55,20 @@ namespace PeterDB {
     //  rbfmScanIterator.close();
 
     class RBFM_ScanIterator {
+        FileHandle & fileHandle;
+
     public:
-        RBFM_ScanIterator() = default;;
+        RBFM_ScanIterator() = default;
 
-        ~RBFM_ScanIterator() = default;;
+        ~RBFM_ScanIterator() = default;
 
+        void init(FileHandle & fHandle);
         // Never keep the results in the memory. When getNextRecord() is called,
         // a satisfying record needs to be fetched from the file.
         // "data" follows the same format as RecordBasedFileManager::insertRecord().
-        RC getNextRecord(RID &rid, void *data) { return RBFM_EOF; };
+        RC getNextRecord(RID &rid, void *data);
 
-        RC close() { return -1; };
+        RC close();
     };
 
     class RecordBasedFileManager {
