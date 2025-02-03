@@ -15,7 +15,6 @@ constexpr PeterDB::SizeType BYTES_FOR_PAGE_STATS = BYTES_FOR_PAGE_SLOT_COUNT + B
 constexpr PeterDB::SizeType TOMBSTONE_BYTE = 1;
 constexpr PeterDB::SizeType BYTES_FOR_PAGE_NUM = 4;
 constexpr PeterDB::SizeType BYTES_FOR_SLOT_NUM = 2;
-constexpr PeterDB::SizeType BYTES_FOR_TOMBSTONE_RECORD = TOMBSTONE_BYTE + BYTES_FOR_PAGE_NUM + BYTES_FOR_SLOT_NUM;
 
 
 namespace PeterDB {
@@ -308,16 +307,16 @@ namespace PeterDB {
         return writeStatus;
     }
 
-    void RecordBasedFileManager::deleteTombstone(char *pageData, unsigned short slotNum, SizeType tombstoneOffset, SizeType tombstoneLen) {
+    RC RecordBasedFileManager::deleteTombstone(FileHandle &fileHandle, char *pageData, unsigned pageNum, unsigned short slotNum, SizeType tombstoneOffset, SizeType tombstoneLen) {
         shiftRecordsLeft(tombstoneOffset + tombstoneLen, tombstoneLen, pageData);
         SizeType zero = 0;
         setSlotOffsetAndLen(&zero, &zero, slotNum, pageData);
+        return fileHandle.writePage(pageNum, pageData);
     }
 
-    RC RecordBasedFileManager::findRealRecord(FileHandle &fileHandle, char *pageData, const RID & rid, SizeType & recoOffset, SizeType & recoLen, bool removeTombstones) {
-        unsigned pageNum = rid.pageNum;
-        unsigned short slotNum = rid.slotNum;
+    RC RecordBasedFileManager::findRealRecord(FileHandle &fileHandle, char *pageData, unsigned & pageNum, unsigned short & slotNum, SizeType & recoOffset, SizeType & recoLen, bool removeTombstones) {
         unsigned short oldSlotNum;
+        unsigned oldPageNum;
         const char * recoStart;
         unsigned char tombstoneCheck;
 
@@ -326,15 +325,20 @@ namespace PeterDB {
             if (fileHandle.readPage(pageNum, pageData) == -1) {delete[] pageData; return -1;}
             // pull offset and length of record from on-page directory
             getSlotOffsetAndLen(&recoOffset, &recoLen, slotNum, pageData);
+            // if length is zero, then record doesn't exist
+            if (recoLen == 0) {delete[] pageData; return -1;}
             recoStart = pageData + recoOffset;
             memmove(&tombstoneCheck, recoStart, TOMBSTONE_BYTE);
 
             if (tombstoneCheck == 0) break;
 
             oldSlotNum = slotNum;
+            oldPageNum = pageNum;
             memmove(&pageNum, recoStart + TOMBSTONE_BYTE, BYTES_FOR_PAGE_NUM);
             memmove(&slotNum, recoStart + TOMBSTONE_BYTE + BYTES_FOR_PAGE_NUM, BYTES_FOR_SLOT_NUM);
-            if (removeTombstones) deleteTombstone(pageData, oldSlotNum, recoOffset, recoLen);
+            if (removeTombstones) {
+                if (deleteTombstone(fileHandle, pageData, oldPageNum, oldSlotNum, recoOffset, recoLen) == -1) {delete[] pageData; return -1;}
+            }
         }
 
         return 0;
@@ -343,8 +347,10 @@ namespace PeterDB {
     RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                           const RID &rid, void *data) {
         char * pageData = new char[PAGE_SIZE];
+        unsigned short startingSlot = rid.slotNum;
+        unsigned startingPage = rid.pageNum;
         SizeType recoOffset, recoLen;
-        if (findRealRecord(fileHandle, pageData, rid, recoOffset, recoLen, false) == -1) return -1;
+        if (findRealRecord(fileHandle, pageData, startingPage, startingSlot, recoOffset, recoLen, false) == -1) return -1;
         SizeType bytesFromStart = TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT;  // start looking after the initial values
 
         // calculate number of null flag bytes, copy those bytes from the record
@@ -363,7 +369,18 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                             const RID &rid) {
-        return -1;
+        char * pageData = new char[PAGE_SIZE];
+        SizeType recoOffset, recoLen;
+        unsigned pageNum = rid.pageNum;
+        unsigned short slotNum = rid.slotNum;
+        if (findRealRecord(fileHandle, pageData, pageNum, slotNum, recoOffset, recoLen, true) == -1) return -1;
+
+        shiftRecordsLeft(recoOffset + recoLen, recoLen, pageData);
+        SizeType zero = 0;
+        setSlotOffsetAndLen(&zero, &zero, slotNum, pageData);
+        RC writeStatus = fileHandle.writePage(pageNum, pageData);
+        delete[] pageData;
+        return writeStatus;
     }
 
     RC RecordBasedFileManager::printRecord(const std::vector<Attribute> &recordDescriptor, const void *data,
@@ -466,7 +483,44 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                             const void *data, const RID &rid) {
-        return -1;
+        // get length of what new record will be for comparison to current record
+        SizeType newRecoLen = calcRecordSpace(recordDescriptor, data) - BYTES_FOR_SLOT_DIR_ENTRY;
+        // initialize variables for page, record offset on page, current record's length, slot number it's using
+        char * pageData = new char[PAGE_SIZE];
+        unsigned pageNum = rid.pageNum;
+        unsigned short slotNum = rid.slotNum;
+        SizeType recoOffset, recoLen;
+        // searches through any existing tombstones to find actual record, gets its offset, length, and slot on its page
+        if (findRealRecord(fileHandle, pageData, pageNum, slotNum, recoOffset, recoLen, false) == -1) return -1;
+        SizeType freeSpace;
+        getFreeSpace(&freeSpace, pageData);
+
+        if (newRecoLen < recoLen) {
+            // updated record will be shorter, so shift page's records to the left
+            shiftRecordsLeft(recoOffset + recoLen, recoLen - newRecoLen, pageData);
+            embedRecord(recoOffset, recordDescriptor, data, pageData);
+        } else if (newRecoLen > recoLen) {
+            SizeType diff = newRecoLen - recoLen;
+            if (diff <= freeSpace) {
+                // if there is enough free space, shift records over and put in updated record
+                shiftRecordsRight(recoOffset + recoLen, diff, pageData);
+                embedRecord(recoOffset, recordDescriptor, data, pageData);
+            } else {
+                // if not enough space, make this record a tombstone then put updated record on new page
+                RID newRid;
+                if (insertRecord(fileHandle, recordDescriptor, data, newRid) == -1) {delete[] pageData; return -1;}
+                memset(pageData + recoOffset, 1, TOMBSTONE_BYTE);
+                memmove(pageData + (recoOffset + TOMBSTONE_BYTE), &newRid.pageNum, BYTES_FOR_PAGE_NUM);
+                memmove(pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_PAGE_NUM), &newRid.slotNum, BYTES_FOR_SLOT_NUM);
+                newRecoLen = recoLen;
+            }
+        } else
+            embedRecord(recoOffset, recordDescriptor, data, pageData);
+
+        setSlotLen(&newRecoLen, slotNum, pageData);
+        RC writeStatus = fileHandle.writePage(pageNum, pageData);
+        delete[] pageData;
+        return writeStatus;
     }
 
     RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
