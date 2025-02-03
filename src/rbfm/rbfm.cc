@@ -566,12 +566,24 @@ namespace PeterDB {
         return -1;
     }
 
-    void RBFM_ScanIterator::init(FileHandle & fHandle) {
+    void RBFM_ScanIterator::init(FileHandle & fHandle, const std::vector<Attribute> &recordDescriptor,
+                                 const std::string &conditionAttribute, const CompOp compOp, const void *value,
+                                 const std::vector<std::string> &attributeNames) {
         fileHandle = fHandle;
+        this->recordDescriptor = recordDescriptor;
+        this->conditionAttribute = conditionAttribute;
+        this->compOp = compOp;
+        this->value = value;
+        this->attributeNames = attributeNames;
     }
 
     RC RBFM_ScanIterator::close() {
         return RecordBasedFileManager::instance().closeFile(fileHandle);
     }
+
+    RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data) {
+        return -1;
+    }
+
 } // namespace PeterDB
 
