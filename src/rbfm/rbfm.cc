@@ -262,7 +262,7 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::insertRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                             const void *data, RID &rid) {
-        char * pageData = new char[PAGE_SIZE];
+        char pageData[PAGE_SIZE];
         memset(pageData, 0, PAGE_SIZE);
         unsigned pageNum;  // page which record will be inserted to, starts with last page
         SizeType recordSpace = calcRecordSpace(recordDescriptor, data);
@@ -273,12 +273,12 @@ namespace PeterDB {
             slotNum = putRecordInEmptyPage(recordDescriptor, data, pageData, recordSpace);
         } else {
             pageNum = fileHandle.pageCount - 1;
-            if (fileHandle.readPage(pageNum, pageData) == -1) {delete[] pageData; return -1;}
+            if (fileHandle.readPage(pageNum, pageData) == -1) return -1;
 
             // if not enough space, need to start iterating through other pages
             if (!fitsOnPage(recordSpace, pageData)) {
                 for (pageNum = 0; pageNum < fileHandle.pageCount - 1; ++pageNum) {
-                    if (fileHandle.readPage(pageNum, pageData) == -1) {delete[] pageData; return -1;}
+                    if (fileHandle.readPage(pageNum, pageData) == -1) return -1;
                     if (fitsOnPage(recordSpace, pageData)) break;  // stop searching if enough space
                 }
 
@@ -303,7 +303,6 @@ namespace PeterDB {
             writeStatus = fileHandle.appendPage(pageData);
         else
             writeStatus = fileHandle.writePage(pageNum, pageData);
-        delete[] pageData;
         return writeStatus;
     }
 
@@ -322,11 +321,11 @@ namespace PeterDB {
 
         // keeps looping through linked pages until the actual, non-tombstone record is found
         while (true) {
-            if (fileHandle.readPage(pageNum, pageData) == -1) {delete[] pageData; return -1;}
+            if (fileHandle.readPage(pageNum, pageData) == -1) return -1;
             // pull offset and length of record from on-page directory
             getSlotOffsetAndLen(&recoOffset, &recoLen, slotNum, pageData);
             // if length is zero, then record doesn't exist
-            if (recoLen == 0) {delete[] pageData; return -1;}
+            if (recoLen == 0) return -1;
             recoStart = pageData + recoOffset;
             memmove(&tombstoneCheck, recoStart, TOMBSTONE_BYTE);
 
@@ -337,7 +336,7 @@ namespace PeterDB {
             memmove(&pageNum, recoStart + TOMBSTONE_BYTE, BYTES_FOR_PAGE_NUM);
             memmove(&slotNum, recoStart + TOMBSTONE_BYTE + BYTES_FOR_PAGE_NUM, BYTES_FOR_SLOT_NUM);
             if (removeTombstones) {
-                if (deleteTombstone(fileHandle, pageData, oldPageNum, oldSlotNum, recoOffset, recoLen) == -1) {delete[] pageData; return -1;}
+                if (deleteTombstone(fileHandle, pageData, oldPageNum, oldSlotNum, recoOffset, recoLen) == -1) return -1;
             }
         }
 
@@ -346,7 +345,7 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                           const RID &rid, void *data) {
-        char * pageData = new char[PAGE_SIZE];
+        char pageData[PAGE_SIZE];
         unsigned short startingSlot = rid.slotNum;
         unsigned startingPage = rid.pageNum;
         SizeType recoOffset, recoLen;
@@ -363,13 +362,12 @@ namespace PeterDB {
 
         // copy rest of record into data variable
         memmove(data, pageData + recoOffset + bytesFromStart, recoLen - bytesFromStart);
-        delete[] pageData;
         return 0;
     }
 
     RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                             const RID &rid) {
-        char * pageData = new char[PAGE_SIZE];
+        char pageData[PAGE_SIZE];
         SizeType recoOffset, recoLen;
         unsigned pageNum = rid.pageNum;
         unsigned short slotNum = rid.slotNum;
@@ -379,7 +377,6 @@ namespace PeterDB {
         SizeType zero = 0;
         setSlotOffsetAndLen(&zero, &zero, slotNum, pageData);
         RC writeStatus = fileHandle.writePage(pageNum, pageData);
-        delete[] pageData;
         return writeStatus;
     }
 
@@ -486,7 +483,7 @@ namespace PeterDB {
         // get length of what new record will be for comparison to current record
         SizeType newRecoLen = calcRecordSpace(recordDescriptor, data) - BYTES_FOR_SLOT_DIR_ENTRY;
         // initialize variables for page, record offset on page, current record's length, slot number it's using
-        char * pageData = new char[PAGE_SIZE];
+        char pageData[PAGE_SIZE];
         unsigned pageNum = rid.pageNum;
         unsigned short slotNum = rid.slotNum;
         SizeType recoOffset, recoLen;
@@ -508,7 +505,7 @@ namespace PeterDB {
             } else {
                 // if not enough space, make this record a tombstone then put updated record on new page
                 RID newRid;
-                if (insertRecord(fileHandle, recordDescriptor, data, newRid) == -1) {delete[] pageData; return -1;}
+                if (insertRecord(fileHandle, recordDescriptor, data, newRid) == -1) return -1;
                 memset(pageData + recoOffset, 1, TOMBSTONE_BYTE);
                 memmove(pageData + (recoOffset + TOMBSTONE_BYTE), &newRid.pageNum, BYTES_FOR_PAGE_NUM);
                 memmove(pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_PAGE_NUM), &newRid.slotNum, BYTES_FOR_SLOT_NUM);
@@ -519,7 +516,6 @@ namespace PeterDB {
 
         setSlotLen(&newRecoLen, slotNum, pageData);
         RC writeStatus = fileHandle.writePage(pageNum, pageData);
-        delete[] pageData;
         return writeStatus;
     }
 
