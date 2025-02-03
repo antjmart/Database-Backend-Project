@@ -56,13 +56,19 @@ namespace PeterDB {
 
     class RBFM_ScanIterator {
         FileHandle & fileHandle;
+        std::vector<Attribute> & recordDescriptor;
+        std::string conditionAttribute;
+        CompOp compOp;
+        const void *value;
+        std::vector<std::string> & attributeNames;
 
     public:
         RBFM_ScanIterator() = default;
 
         ~RBFM_ScanIterator() = default;
 
-        void init(FileHandle & fHandle);
+        void init(FileHandle & fHandle, const std::vector<Attribute> &recordDescriptor, const std::string &conditionAttribute,
+                  const CompOp compOp, const void *value, const std::vector<std::string> &attributeNames);
         // Never keep the results in the memory. When getNextRecord() is called,
         // a satisfying record needs to be fetched from the file.
         // "data" follows the same format as RecordBasedFileManager::insertRecord().
