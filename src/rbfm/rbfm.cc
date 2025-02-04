@@ -420,12 +420,11 @@ namespace PeterDB {
                         memmove(&varcharLen, dataPos, INT_BYTES);
                         dataPos += INT_BYTES;
 
-                        char * val = new char[varcharLen + 1];
+                        char val[varcharLen + 1];
                         memmove(val, dataPos, varcharLen);
                         val[varcharLen] = '\0';
                         out << val;
                         dataPos += varcharLen;
-                        delete[] val;
                     }
                 } else {
                     // null value for attribute
@@ -543,7 +542,14 @@ namespace PeterDB {
         SizeType nullFlagBytes = nullBytesNeeded(recordDescriptor.size());
         unsigned char nullByte;
         memmove(&nullByte, pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytes / BITS_IN_BYTE), 1);
-        if (nullBitOn(nullByte, nullFlagBytes % BITS_IN_BYTE)) return 0;
+
+        if (nullBitOn(nullByte, nullFlagBytes % BITS_IN_BYTE)) {
+            memset(data, 1, 1);
+            return 0;
+        }
+        memset(data, 0, 1);
+        data = static_cast<char *>(data) + 1;
+
         SizeType attrOffset;
         memmove(&attrOffset, pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytes + BYTES_FOR_POINTER_TO_RECORD_FIELD * attrIndex), BYTES_FOR_POINTER_TO_RECORD_FIELD);
         char * attrLocation = pageData + (recoOffset + attrOffset);
@@ -690,14 +696,50 @@ namespace PeterDB {
             char valString[varcharLen + 1];
             memmove(valString, conditionAttrVal + INT_BYTES, varcharLen);
             valString[varcharLen] = '\0';
-            std::string attrVal = std::string{valString};
+            std::string attrVal{valString};
 
             return compareVarchar(attrVal);
         }
     }
 
     void RBFM_ScanIterator::extractRecordData(const char * recordData, void * data) {
-        return;
+        const char *recordNullsPtr = recordData + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT;
+        const char *recordDirPtr = recordNullsPtr + RecordBasedFileManager::instance().nullBytesNeeded(recordDescriptor.size());
+        int attrNamesIndex = 0;
+        unsigned char nullByte;
+        SizeType newNullByteCount = RecordBasedFileManager::instance().nullBytesNeeded(attributeNames.size());
+        unsigned char newNullBytes[newNullByteCount] = {0};
+        char *dataPtr = static_cast<char *>(data) + newNullByteCount;
+        SizeType attrOffset;
+
+        for (int recordDescIndex = 0; recordDescIndex < recordDescriptor.size() && attrNamesIndex < attributeNames.size(); ++recordDescIndex) {
+            if (recordDescIndex % BITS_IN_BYTE == 0) {
+                memmove(&nullByte, recordNullsPtr, 1);
+                ++recordNullsPtr;
+            }
+
+            if (recordDescriptor[recordDescIndex].name == attributeNames[attrNamesIndex]) {
+                if (RecordBasedFileManager::instance().nullBitOn(nullByte, recordDescIndex % BITS_IN_BYTE + 1))
+                    newNullBytes[attrNamesIndex / BITS_IN_BYTE] |= 1 << (BITS_IN_BYTE - attrNamesIndex % BITS_IN_BYTE - 1);
+                else {
+                    memmove(&attrOffset, recordDirPtr + BYTES_FOR_POINTER_TO_RECORD_FIELD * recordDescIndex, BYTES_FOR_POINTER_TO_RECORD_FIELD);
+
+                    if (recordDescriptor[recordDescIndex].type != TypeVarChar) {
+                        memmove(dataPtr, recordData + attrOffset, recordDescriptor[recordDescIndex].length);
+                        dataPtr += recordDescriptor[recordDescIndex].length;
+                    } else {
+                        // must get length value from varchar field to know needed space
+                        int varcharLen;
+                        memmove(&varcharLen, recordData + attrOffset, INT_BYTES);
+                        memmove(dataPtr, recordData + attrOffset, varcharLen + INT_BYTES);
+                        dataPtr += varcharLen + INT_BYTES;
+                    }
+                }
+                ++attrNamesIndex;
+            }
+        }
+
+        memmove(data, newNullBytes, newNullByteCount);
     }
 
     RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data) {
