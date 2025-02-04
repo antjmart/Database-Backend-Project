@@ -69,6 +69,9 @@ namespace PeterDB {
 
         bool acceptedRecord(const char * recordData, unsigned pageNum, unsigned short slotNum);
         void extractRecordData(const char * recordData, void * data);
+        bool compareInt(int conditionAttr);
+        bool compareReal(float conditionAttr);
+        bool compareVarchar(const std::string & conditionAttr);
 
     public:
         RBFM_ScanIterator() = default;
