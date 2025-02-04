@@ -158,6 +158,8 @@ namespace PeterDB {
         RC findRealRecord(FileHandle &fileHandle, char *pageData, unsigned & pageNum, unsigned short & slotNum, SizeType & recoOffset, SizeType & recoLen, bool removeTombstones);
         void getSlotCount(SizeType * slotCount, const void * pageData);
         void getSlotOffset(SizeType * offset, SizeType slotNum, const void * pageData);
+        SizeType nullBytesNeeded(SizeType numFields);
+        bool nullBitOn(unsigned char nullByte, int bitNum);
 
     protected:
         RecordBasedFileManager();                                                   // Prevent construction
@@ -165,8 +167,6 @@ namespace PeterDB {
         RecordBasedFileManager(const RecordBasedFileManager &);                     // Prevent construction by copying
         RecordBasedFileManager &operator=(const RecordBasedFileManager &);          // Prevent assignment
 
-        SizeType nullBytesNeeded(SizeType numFields);
-        bool nullBitOn(unsigned char nullByte, int bitNum);
         // helper functions for insertRecord method
         SizeType calcRecordSpace(const std::vector<Attribute> &recordDescriptor, const void * data);
         SizeType putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace);
