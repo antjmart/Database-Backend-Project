@@ -583,6 +583,7 @@ namespace PeterDB {
         for (auto attr : recordDescriptor) {
             if (attr.name == conditionAttribute) {
                 valueType = attr.type;
+                conditionAttrLen = attr.length;
                 break;
             }
         }
@@ -596,16 +597,107 @@ namespace PeterDB {
             // if value is varchar, get length of the character section, append null character, then convert into string object
             int varcharLen;
             memmove(&varcharLen, value, INT_BYTES);
-            char * valString = new char[varcharLen + 1];
+            char valString[varcharLen + 1];
             memmove(valString, static_cast<const char *>(value) + INT_BYTES, varcharLen);
             valString[varcharLen] = '\0';
             valueString = std::string{valString};
-            delete[] valString;
         }
     }
 
     RC RBFM_ScanIterator::close() {
         return RecordBasedFileManager::instance().closeFile(fileHandle);
+    }
+
+    bool RBFM_ScanIterator::compareInt(int conditionAttr) {
+        switch (compOp) {
+            case EQ_OP:
+                return conditionAttr == valueInt;
+            case NE_OP:
+                return conditionAttr != valueInt;
+            case LT_OP:
+                return conditionAttr < valueInt;
+            case GT_OP:
+                return conditionAttr > valueInt;
+            case LE_OP:
+                return conditionAttr <= valueInt;
+            case GE_OP:
+                return conditionAttr >= valueInt;
+            default:
+                return false;
+        }
+    }
+
+    bool RBFM_ScanIterator::compareReal(float conditionAttr) {
+        switch (compOp) {
+            case EQ_OP:
+                return conditionAttr == valueReal;
+            case NE_OP:
+                return conditionAttr != valueReal;
+            case LT_OP:
+                return conditionAttr < valueReal;
+            case GT_OP:
+                return conditionAttr > valueReal;
+            case LE_OP:
+                return conditionAttr <= valueReal;
+            case GE_OP:
+                return conditionAttr >= valueReal;
+            default:
+                return false;
+        }
+    }
+
+    bool RBFM_ScanIterator::compareVarchar(const std::string & conditionAttr) {
+        switch (compOp) {
+            case EQ_OP:
+                return conditionAttr == valueString;
+            case NE_OP:
+                return conditionAttr != valueString;
+            case LT_OP:
+                return conditionAttr < valueString;
+            case GT_OP:
+                return conditionAttr > valueString;
+            case LE_OP:
+                return conditionAttr <= valueString;
+            case GE_OP:
+                return conditionAttr >= valueString;
+            default:
+                return false;
+        }
+    }
+
+    bool RBFM_ScanIterator::acceptedRecord(const char * recordData, unsigned pageNum, unsigned short slotNum) {
+        if (compOp == NO_OP) return true;
+        char conditionAttrVal[conditionAttrLen + INT_BYTES + 1];
+        RID recordRid{pageNum, slotNum};
+        if (RecordBasedFileManager::instance().readAttribute(fileHandle, recordDescriptor, recordRid, conditionAttribute, conditionAttrVal) == -1) return false;
+
+        unsigned char nullByte;
+        memmove(&nullByte, conditionAttrVal, 1);
+        if (nullByte == 1) return false;
+
+        if (valueType == TypeInt) {
+            int attrVal;
+            memmove(&attrVal, conditionAttrVal + 1, INT_BYTES);
+            return compareInt(attrVal);
+        } else if (valueType == TypeReal) {
+            float attrVal;
+            memmove(&attrVal, conditionAttrVal + 1, INT_BYTES);
+            return compareReal(attrVal);
+        } else {
+            // if value is varchar, get length of the character section, append null character, then convert into string object
+            int varcharLen;
+            memmove(&varcharLen, conditionAttrVal + 1, INT_BYTES);
+            char valString[varcharLen + 1];
+            memmove(valString, conditionAttrVal + INT_BYTES, varcharLen);
+            valString[varcharLen] = '\0';
+            std::string attrVal = std::string{valString};
+
+            return compareVarchar(attrVal);
+        }
+    }
+
+    void RBFM_ScanIterator::extractRecordData(const char * recordData, void * data) {
+        return;
     }
 
     RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data) {
@@ -636,7 +728,7 @@ namespace PeterDB {
                 memmove(&tombstoneCheck, pageData + recoOffset, TOMBSTONE_BYTE);
                 if (tombstoneCheck == 1) continue;
 
-                if (acceptedRecord(pageData + recoOffset)) {
+                if (acceptedRecord(pageData + recoOffset, currPageNum, currSlotNum)) {
                     extractRecordData(pageData + recoOffset, data);
                     rid.pageNum = currPageNum;
                     rid.slotNum = currSlotNum;
