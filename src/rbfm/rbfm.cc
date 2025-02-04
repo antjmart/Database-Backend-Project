@@ -758,7 +758,7 @@ namespace PeterDB {
 
         char pageData[PAGE_SIZE];
         SizeType currSlotCount;
-        SizeType recoOffset;
+        SizeType recoOffset, recoLen;
         unsigned char tombstoneCheck;
 
         for (; currPageNum < fileHandle.pageCount; ++currPageNum, currSlotNum = 0) {
@@ -766,9 +766,10 @@ namespace PeterDB {
             RecordBasedFileManager::instance().getSlotCount(&currSlotCount, pageData);
 
             for (; currSlotNum <= currSlotCount; ++currSlotNum) {
-                RecordBasedFileManager::instance().getSlotOffset(&recoOffset, currSlotNum, pageData);
+                RecordBasedFileManager::instance().getSlotOffsetAndLen(&recoOffset, &recoLen, currSlotNum, pageData);
+                if (recoLen == 0) continue;  // need to skip over unused empty slots
                 memmove(&tombstoneCheck, pageData + recoOffset, TOMBSTONE_BYTE);
-                if (tombstoneCheck == 1) continue;
+                if (tombstoneCheck == 1) continue;  // don't want to scan over tombstones, just real records
 
                 if (acceptedRecord(pageData + recoOffset, currPageNum, currSlotNum)) {
                     extractRecordData(pageData + recoOffset, data);
