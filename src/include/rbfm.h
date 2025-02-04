@@ -89,6 +89,8 @@ namespace PeterDB {
     };
 
     class RecordBasedFileManager {
+        friend class RBFM_ScanIterator;
+
     public:
         static RecordBasedFileManager &instance();                          // Access to the singleton instance
 
@@ -155,12 +157,6 @@ namespace PeterDB {
                 const std::vector<std::string> &attributeNames, // a list of projected attributes
                 RBFM_ScanIterator &rbfm_ScanIterator);
 
-        RC findRealRecord(FileHandle &fileHandle, char *pageData, unsigned & pageNum, unsigned short & slotNum, SizeType & recoOffset, SizeType & recoLen, bool removeTombstones);
-        void getSlotCount(SizeType * slotCount, const void * pageData);
-        void getSlotOffset(SizeType * offset, SizeType slotNum, const void * pageData);
-        SizeType nullBytesNeeded(SizeType numFields);
-        bool nullBitOn(unsigned char nullByte, int bitNum);
-
     protected:
         RecordBasedFileManager();                                                   // Prevent construction
         ~RecordBasedFileManager();                                                  // Prevent unwanted destruction
@@ -180,13 +176,18 @@ namespace PeterDB {
         void setSlotOffset(SizeType * offset, SizeType slotNum, void * pageData);
         void getSlotLen(SizeType * len, SizeType slotNum, const void * pageData);
         void setSlotLen(SizeType * len, SizeType slotNum, void * pageData);
-        void getSlotOffsetAndLen(SizeType * offset, SizeType * len, SizeType slotNum, const void * pageData);
         void setSlotOffsetAndLen(SizeType * offset, SizeType * len, SizeType slotNum, void * pageData);
         SizeType assignSlot(const void * pageData);
         bool fitsOnPage(SizeType recordSpace, const void * pageData);
         void shiftRecordsLeft(SizeType shiftPoint, SizeType shiftDistance, void * pageData);
         void shiftRecordsRight(SizeType shiftPoint, SizeType shiftDistance, void * pageData);
         RC deleteTombstone(FileHandle &fileHandle, char *pageData, unsigned pageNum, unsigned short slotNum, SizeType tombstoneOffset, SizeType tombstoneLen);
+        RC findRealRecord(FileHandle &fileHandle, char *pageData, unsigned & pageNum, unsigned short & slotNum, SizeType & recoOffset, SizeType & recoLen, bool removeTombstones);
+        void getSlotCount(SizeType * slotCount, const void * pageData);
+        void getSlotOffset(SizeType * offset, SizeType slotNum, const void * pageData);
+        SizeType nullBytesNeeded(SizeType numFields);
+        bool nullBitOn(unsigned char nullByte, int bitNum);
+        void getSlotOffsetAndLen(SizeType * offset, SizeType * len, SizeType slotNum, const void * pageData);
     };
 
 } // namespace PeterDB
