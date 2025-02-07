@@ -3,8 +3,18 @@
 
 #include <string>
 #include <vector>
-
 #include "src/include/rbfm.h"
+
+struct tupleVal {
+    int intVal;
+    float floatVal;
+    const char *stringVal;
+    std::string type;
+
+    explicit tupleVal(int i) : intVal(i), type("int") {}
+    explicit tupleVal(float f) : floatVal(f), type("float") {}
+    explicit tupleVal(const char *s) : stringVal(s), type("str") {}
+};
 
 namespace PeterDB {
 #define RM_EOF (-1)  // end of a scan operator
@@ -98,7 +108,9 @@ namespace PeterDB {
         ~RelationManager();                                                 // Prevent unwanted destruction
         RelationManager(const RelationManager &);                           // Prevent construction by copying
         RelationManager &operator=(const RelationManager &);                // Prevent assignment
-
+        void craftTupleData(char *data, const std::vector<tupleVal> & values);
+        RC initTablesTable(FileHandle &fh);
+        RC initColumnsTable(FileHandle &fh);
     };
 
 } // namespace PeterDB
