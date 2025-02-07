@@ -15,7 +15,7 @@ constexpr PeterDB::SizeType BYTES_FOR_PAGE_STATS = BYTES_FOR_PAGE_SLOT_COUNT + B
 constexpr PeterDB::SizeType TOMBSTONE_BYTE = 1;
 constexpr PeterDB::SizeType BYTES_FOR_PAGE_NUM = 4;
 constexpr PeterDB::SizeType BYTES_FOR_SLOT_NUM = 2;
-
+constexpr PeterDB::SizeType MAX_RECORD_SIZE = PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY;
 
 namespace PeterDB {
     RecordBasedFileManager &RecordBasedFileManager::instance() {
@@ -266,6 +266,7 @@ namespace PeterDB {
         memset(pageData, 0, PAGE_SIZE);
         unsigned pageNum;  // page which record will be inserted to, starts with last page
         SizeType recordSpace = calcRecordSpace(recordDescriptor, data);
+        if (recordSpace - BYTES_FOR_SLOT_DIR_ENTRY > MAX_RECORD_SIZE) return -1;  // record will not fit on a page
         SizeType slotNum;
 
         if (fileHandle.pageCount == 0) {
@@ -481,6 +482,7 @@ namespace PeterDB {
                                             const void *data, const RID &rid) {
         // get length of what new record will be for comparison to current record
         SizeType newRecoLen = calcRecordSpace(recordDescriptor, data) - BYTES_FOR_SLOT_DIR_ENTRY;
+        if (newRecoLen > MAX_RECORD_SIZE) return -1;  // updated record cannot fit on a page
         // initialize variables for page, record offset on page, current record's length, slot number it's using
         char pageData[PAGE_SIZE];
         unsigned pageNum = rid.pageNum;
