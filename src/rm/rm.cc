@@ -47,9 +47,9 @@ namespace PeterDB {
         }
     }
 
-    RC RelationManager::addTablesEntry(FileHandle &fh, int table_id, int tableNameLen, const char *tableName, int fileNameLen, const char *fileName, int isSystem, char *data, SizeType nullBytes) {
+    RC RelationManager::addTablesEntry(FileHandle &fh, int table_id, int tableNameLen, const char *tableName, int fileNameLen, const char *fileName, int isSystem, char *data) {
         std::vector<tupleVal> values{tupleVal{table_id}, tupleVal{tableNameLen}, tupleVal{tableName}, tupleVal{fileNameLen}, tupleVal{fileName}, tupleVal{isSystem}};
-        craftTupleData(data + nullBytes, values);
+        craftTupleData(data + 1, values);
         RID rid;
         return RecordBasedFileManager::instance().insertRecord(fh, tablesDescriptor, data, rid);
     }
@@ -60,15 +60,15 @@ namespace PeterDB {
         if (rbfm.openFile("Tables", fh) == -1) return -1;
         memset(data, 0, 1);
 
-        if (addTablesEntry(fh, 1, 6, "Tables", 6, "Tables", 1, data, 1) == -1) return -1;
-        if (addTablesEntry(fh, 2, 7, "Columns", 7, "Columns", 1, data, 1) == -1) return -1;
+        if (addTablesEntry(fh, 1, 6, "Tables", 6, "Tables", 1, data) == -1) return -1;
+        if (addTablesEntry(fh, 2, 7, "Columns", 7, "Columns", 1, data) == -1) return -1;
 
         return rbfm.closeFile(fh);
     }
 
-    RC RelationManager::addColumnsEntry(FileHandle &fh, int table_id, int nameLen, const char *name, AttrType columnType, int columnLen, int pos, char *data, SizeType nullBytes) {
+    RC RelationManager::addColumnsEntry(FileHandle &fh, int table_id, int nameLen, const char *name, AttrType columnType, int columnLen, int pos, char *data) {
         std::vector<tupleVal> values{tupleVal{table_id}, tupleVal{nameLen}, tupleVal{name}, tupleVal{columnType}, tupleVal{columnLen}, tupleVal{pos}};
-        craftTupleData(data + nullBytes, values);
+        craftTupleData(data + 1, values);
         RID rid;
         return RecordBasedFileManager::instance().insertRecord(fh, columnsDescriptor, data, rid);
     }
@@ -79,15 +79,15 @@ namespace PeterDB {
         if (rbfm.openFile("Columns", fh) == -1) return -1;
         memset(data, 0, 1);
 
-        if (addColumnsEntry(fh, 1, 8, "table-id", TypeInt, 4, 1, data, 1) == -1) return -1;
-        if (addColumnsEntry(fh, 1, 10, "table-name", TypeVarChar, 50, 2, data, 1) == -1) return -1;
-        if (addColumnsEntry(fh, 1, 9, "file-name", TypeVarChar, 50, 3, data, 1) == -1) return -1;
-        if (addColumnsEntry(fh, 1, 15, "is-system-table", TypeInt, 4, 4, data, 1) == -1) return -1;
-        if (addColumnsEntry(fh, 2, 8, "table-id", TypeInt, 4, 1, data, 1) == -1) return -1;
-        if (addColumnsEntry(fh, 2, 11, "column-name", TypeVarChar, 50, 2, data, 1) == -1) return -1;
-        if (addColumnsEntry(fh, 2, 11, "column-type", TypeInt, 4, 3, data, 1) == -1) return -1;
-        if (addColumnsEntry(fh, 2, 13, "column-length", TypeInt, 4, 4, data, 1) == -1) return -1;
-        if (addColumnsEntry(fh, 2, 15, "column-position", TypeInt, 4, 5, data, 1) == -1) return -1;
+        if (addColumnsEntry(fh, 1, 8, "table-id", TypeInt, 4, 1, data) == -1) return -1;
+        if (addColumnsEntry(fh, 1, 10, "table-name", TypeVarChar, 50, 2, data) == -1) return -1;
+        if (addColumnsEntry(fh, 1, 9, "file-name", TypeVarChar, 50, 3, data) == -1) return -1;
+        if (addColumnsEntry(fh, 1, 15, "is-system-table", TypeInt, 4, 4, data) == -1) return -1;
+        if (addColumnsEntry(fh, 2, 8, "table-id", TypeInt, 4, 1, data) == -1) return -1;
+        if (addColumnsEntry(fh, 2, 11, "column-name", TypeVarChar, 50, 2, data) == -1) return -1;
+        if (addColumnsEntry(fh, 2, 11, "column-type", TypeInt, 4, 3, data) == -1) return -1;
+        if (addColumnsEntry(fh, 2, 13, "column-length", TypeInt, 4, 4, data) == -1) return -1;
+        if (addColumnsEntry(fh, 2, 15, "column-position", TypeInt, 4, 5, data) == -1) return -1;
 
         return rbfm.closeFile(fh);
     }
@@ -98,6 +98,7 @@ namespace PeterDB {
         if (rbfm.createFile("Tables") == -1) return -1;
         if (rbfm.createFile("Columns") == -1) return -1;
         FileHandle fh;
+        nextTableID = 3;  // reset table ID tracker every time catalog is made
 
         if (initTablesTable(fh) == -1) return -1;
         return initColumnsTable(fh);
@@ -108,7 +109,24 @@ namespace PeterDB {
     }
 
     RC RelationManager::createTable(const std::string &tableName, const std::vector<Attribute> &attrs) {
-        return -1;
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        if (rbfm.createFile(tableName) == -1) return -1;  // error if table already exists
+        FileHandle fh;
+        char data[1024];
+        memset(data, 0, 1);
+
+        if (rbfm.openFile("Tables", fh) == -1) return -1;
+        if (addTablesEntry(fh, nextTableID, tableName.size(), tableName.c_str(), tableName.size(), tableName.c_str(), 0, data) == -1) return -1;
+        if (rbfm.closeFile(fh) == -1) return -1;
+
+        if (rbfm.openFile("Columns", fh) == -1) return -1;
+        int pos = 1;
+        for (Attribute attr : attrs) {
+            if (addColumnsEntry(fh, nextTableID, attr.name.size(), attr.name.c_str(), attr.type,attr.length, pos, data) == -1) return -1;
+            ++pos;
+        }
+        ++nextTableID;
+        return rbfm.closeFile(fh);
     }
 
     RC RelationManager::deleteTable(const std::string &tableName) {
