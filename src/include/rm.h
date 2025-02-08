@@ -111,6 +111,8 @@ namespace PeterDB {
         void craftTupleData(char *data, const std::vector<tupleVal> & values);
         RC initTablesTable(FileHandle &fh);
         RC initColumnsTable(FileHandle &fh);
+        RC addTablesEntry(FileHandle &fh, int table_id, int tableNameLen, const char *tableName, int fileNameLen, const char *fileName, int isSystem, char *data, SizeType nullBytes);
+        RC addColumnsEntry(FileHandle &fh, int table_id, int nameLen, const char *name, AttrType columnType, int columnLen, int pos, char *data, SizeType nullBytes);
     };
 
 } // namespace PeterDB
