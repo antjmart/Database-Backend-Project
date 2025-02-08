@@ -579,7 +579,7 @@ namespace PeterDB {
                                  const std::string &conditionAttribute, const CompOp compOp, const void *value,
                                  const std::vector<std::string> &attributeNames) {
         // initialize main variables
-        fileHandle = fHandle;
+        fileHandle = &fHandle;
         this->recordDescriptor = recordDescriptor;
         this->conditionAttribute = conditionAttribute;
         this->compOp = compOp;
@@ -613,7 +613,7 @@ namespace PeterDB {
     }
 
     RC RBFM_ScanIterator::close() {
-        RC closeStatus = RecordBasedFileManager::instance().closeFile(fileHandle);
+        RC closeStatus = RecordBasedFileManager::instance().closeFile(*fileHandle);
         delete &fileHandle;
         return closeStatus;
     }
@@ -679,7 +679,7 @@ namespace PeterDB {
         if (compOp == NO_OP) return true;
         char conditionAttrVal[conditionAttrLen + INT_BYTES + 1];
         RID recordRid{pageNum, slotNum};
-        if (RecordBasedFileManager::instance().readAttribute(fileHandle, recordDescriptor, recordRid, conditionAttribute, conditionAttrVal) == -1) return false;
+        if (RecordBasedFileManager::instance().readAttribute(*fileHandle, recordDescriptor, recordRid, conditionAttribute, conditionAttrVal) == -1) return false;
 
         unsigned char nullByte;
         memmove(&nullByte, conditionAttrVal, 1);
@@ -765,8 +765,8 @@ namespace PeterDB {
         SizeType recoOffset, recoLen;
         unsigned char tombstoneCheck;
 
-        for (; currPageNum < fileHandle.pageCount; ++currPageNum, currSlotNum = 0) {
-            if (fileHandle.readPage(currPageNum, pageData) == -1) return -1;
+        for (; currPageNum < fileHandle->pageCount; ++currPageNum, currSlotNum = 0) {
+            if (fileHandle->readPage(currPageNum, pageData) == -1) return -1;
             RecordBasedFileManager::instance().getSlotCount(&currSlotCount, pageData);
 
             for (; currSlotNum <= currSlotCount; ++currSlotNum) {
