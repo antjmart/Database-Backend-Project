@@ -1,4 +1,8 @@
 #include "src/include/rm.h"
+#include <cstring>
+
+constexpr int INT_BYTES = 4;
+constexpr int FLOAT_BYTES = 4;
 
 namespace PeterDB {
     RelationManager &RelationManager::instance() {
@@ -6,7 +10,17 @@ namespace PeterDB {
         return _relation_manager;
     }
 
-    RelationManager::RelationManager() = default;
+    RelationManager::RelationManager() {
+        tablesDescriptor.push_back(Attribute{"table-id", TypeInt, 4});
+        tablesDescriptor.push_back(Attribute{"table-name", TypeVarChar, 50});
+        tablesDescriptor.push_back(Attribute{"file-name", TypeVarChar, 50});
+        tablesDescriptor.push_back(Attribute{"is-system-table", TypeInt, 4});
+        columnsDescriptor.push_back(Attribute{"table-id", TypeInt, 4});
+        columnsDescriptor.push_back(Attribute{"column-name", TypeVarChar, 50});
+        columnsDescriptor.push_back(Attribute{"column-type", TypeInt, 4});
+        columnsDescriptor.push_back(Attribute{"column-length", TypeInt, 4});
+        columnsDescriptor.push_back(Attribute{"column-position", TypeInt, 4});
+    }
 
     RelationManager::~RelationManager() = default;
 
@@ -14,8 +28,79 @@ namespace PeterDB {
 
     RelationManager &RelationManager::operator=(const RelationManager &) = default;
 
+    void RelationManager::craftTupleData(char *data, const std::vector<tupleVal> & values) {
+        int numVals = values.size();
+        std::string valType;
+
+        for (int i = 0; i < numVals; ++i) {
+            valType = values[i].type;
+            if (valType == "int") {
+                memmove(data, &values[i].intVal, INT_BYTES);
+                data += INT_BYTES;
+            } else if (valType == "float") {
+                memmove(data, &values[i].floatVal, FLOAT_BYTES);
+                data += FLOAT_BYTES;
+            } else if (valType == "str") {
+                memmove(data, values[i].stringVal, values[i - 1].intVal);
+                data += values[i - 1].intVal;
+            }
+        }
+    }
+
+    RC RelationManager::addTablesEntry(FileHandle &fh, int table_id, int tableNameLen, const char *tableName, int fileNameLen, const char *fileName, int isSystem, char *data, SizeType nullBytes) {
+        std::vector<tupleVal> values{tupleVal{table_id}, tupleVal{tableNameLen}, tupleVal{tableName}, tupleVal{fileNameLen}, tupleVal{fileName}, tupleVal{isSystem}};
+        craftTupleData(data + nullBytes, values);
+        RID rid;
+        return RecordBasedFileManager::instance().insertRecord(fh, tablesDescriptor, data, rid);
+    }
+
+    RC RelationManager::initTablesTable(FileHandle &fh) {
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        char data[50];
+        if (rbfm.openFile("Tables", fh) == -1) return -1;
+        memset(data, 0, 1);
+
+        if (addTablesEntry(fh, 1, 6, "Tables", 6, "Tables", 1, data, 1) == -1) return -1;
+        if (addTablesEntry(fh, 2, 7, "Columns", 7, "Columns", 1, data, 1) == -1) return -1;
+
+        return rbfm.closeFile(fh);
+    }
+
+    RC RelationManager::addColumnsEntry(FileHandle &fh, int table_id, int nameLen, const char *name, AttrType columnType, int columnLen, int pos, char *data, SizeType nullBytes) {
+        std::vector<tupleVal> values{tupleVal{table_id}, tupleVal{nameLen}, tupleVal{name}, tupleVal{columnType}, tupleVal{columnLen}, tupleVal{pos}};
+        craftTupleData(data + nullBytes, values);
+        RID rid;
+        return RecordBasedFileManager::instance().insertRecord(fh, columnsDescriptor, data, rid);
+    }
+
+    RC RelationManager::initColumnsTable(FileHandle &fh) {
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        char data[50];
+        if (rbfm.openFile("Columns", fh) == -1) return -1;
+        memset(data, 0, 1);
+
+        if (addColumnsEntry(fh, 1, 8, "table-id", TypeInt, 4, 1, data, 1) == -1) return -1;
+        if (addColumnsEntry(fh, 1, 10, "table-name", TypeVarChar, 50, 2, data, 1) == -1) return -1;
+        if (addColumnsEntry(fh, 1, 9, "file-name", TypeVarChar, 50, 3, data, 1) == -1) return -1;
+        if (addColumnsEntry(fh, 1, 15, "is-system-table", TypeInt, 4, 4, data, 1) == -1) return -1;
+        if (addColumnsEntry(fh, 2, 8, "table-id", TypeInt, 4, 1, data, 1) == -1) return -1;
+        if (addColumnsEntry(fh, 2, 11, "column-name", TypeVarChar, 50, 2, data, 1) == -1) return -1;
+        if (addColumnsEntry(fh, 2, 11, "column-type", TypeInt, 4, 3, data, 1) == -1) return -1;
+        if (addColumnsEntry(fh, 2, 13, "column-length", TypeInt, 4, 4, data, 1) == -1) return -1;
+        if (addColumnsEntry(fh, 2, 15, "column-position", TypeInt, 4, 5, data, 1) == -1) return -1;
+
+        return rbfm.closeFile(fh);
+    }
+
     RC RelationManager::createCatalog() {
-        return -1;
+        // create files to store records for Tables and Columns, error if either already exists
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        if (rbfm.createFile("Tables") == -1) return -1;
+        if (rbfm.createFile("Columns") == -1) return -1;
+        FileHandle fh;
+
+        if (initTablesTable(fh) == -1) return -1;
+        return initColumnsTable(fh);
     }
 
     RC RelationManager::deleteCatalog() {
