@@ -1,5 +1,6 @@
 #include "src/include/rm.h"
 #include <cstring>
+#include <map>
 
 constexpr int INT_BYTES = 4;
 constexpr int FLOAT_BYTES = 4;
@@ -20,6 +21,11 @@ namespace PeterDB {
         columnsDescriptor.push_back(Attribute{"column-type", TypeInt, 4});
         columnsDescriptor.push_back(Attribute{"column-length", TypeInt, 4});
         columnsDescriptor.push_back(Attribute{"column-position", TypeInt, 4});
+        columnsColumns.emplace_back("table-id");
+        columnsColumns.emplace_back("column-name");
+        columnsColumns.emplace_back("column-type");
+        columnsColumns.emplace_back("column-length");
+        columnsColumns.emplace_back("column-position");
     }
 
     RelationManager::~RelationManager() = default;
@@ -105,7 +111,8 @@ namespace PeterDB {
     }
 
     RC RelationManager::deleteCatalog() {
-        return -1;
+        if (RecordBasedFileManager::instance().destroyFile("Tables") == -1) return -1;
+        return RecordBasedFileManager::instance().destroyFile("Columns");
     }
 
     RC RelationManager::createTable(const std::string &tableName, const std::vector<Attribute> &attrs) {
@@ -134,7 +141,48 @@ namespace PeterDB {
     }
 
     RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs) {
-        return -1;
+        RM_ScanIterator scanner;
+        std::string tables{"Tables"};
+        std::string columns{"Columns"};
+        std::string table_name_field{"table-name"};
+        std::string columns_table_id{"table-id"};
+
+        // first, scan through Tables table to get id of tableName
+        std::vector<std::string> neededAttributes;
+        neededAttributes.emplace_back("table-id");
+        if (scan(tables, table_name_field, EQ_OP, tableName.c_str(), neededAttributes, scanner) == -1) return -1;
+        RID rid;
+        char data[100];
+        if (scanner.getNextTuple(rid, data) == RM_EOF) return -1;
+        int tableID;
+        memmove(&tableID, data + 1, INT_BYTES);
+        if (scanner.close() == -1) return -1;
+
+        // now, scan through columns table searching for the table ID we now have
+        if (scan(columns, columns_table_id, EQ_OP, &tableID, columnsColumns, scanner) == -1) return -1;
+        std::map<int, Attribute> attrOrdering;
+        while (scanner.getNextTuple(rid, data) != RM_EOF) {
+            char *ptr = data + (1 + INT_BYTES);
+            Attribute attr;
+            int nameLen;
+            memmove(&nameLen, ptr, INT_BYTES);
+            ptr += INT_BYTES;
+            char name[nameLen + 1];
+            memmove(name, ptr, nameLen);
+            name[nameLen] = '\0';
+            attr.name = name;
+            ptr += nameLen;
+            memmove(&attr.type, ptr, INT_BYTES);
+            ptr += INT_BYTES;
+            memmove(&attr.length, ptr, INT_BYTES);
+            ptr += INT_BYTES;
+            int pos;
+            memmove(&pos, ptr, INT_BYTES);
+            attrOrdering[pos] = attr;
+        }
+        for (auto const & pair : attrOrdering)
+            attrs.push_back(pair.second);
+        if (scanner.close() == -1) return -1;
     }
 
     RC RelationManager::insertTuple(const std::string &tableName, const void *data, RID &rid) {
@@ -168,16 +216,33 @@ namespace PeterDB {
                              const void *value,
                              const std::vector<std::string> &attributeNames,
                              RM_ScanIterator &rm_ScanIterator) {
-        return -1;
+        FileHandle *fh = new FileHandle();
+        if (RecordBasedFileManager::instance().openFile(tableName, *fh) == -1) return -1;
+
+        std::vector<Attribute> attrs;
+        if (tableName == "Tables") attrs = tablesDescriptor;
+        else if (tableName == "Columns") attrs = columnsDescriptor;
+        else {if (getAttributes(tableName, attrs) == -1) return -1;}
+        rm_ScanIterator.init(*fh, attrs, conditionAttribute, compOp, value, attributeNames);
+        return 0;
     }
 
     RM_ScanIterator::RM_ScanIterator() = default;
 
     RM_ScanIterator::~RM_ScanIterator() = default;
 
-    RC RM_ScanIterator::getNextTuple(RID &rid, void *data) { return RM_EOF; }
+    void RM_ScanIterator::init(FileHandle & fHandle, const std::vector<Attribute> &recordDescriptor, const std::string &conditionAttribute,
+                  const CompOp compOp, const void *value, const std::vector<std::string> &attributeNames) {
+        recordScanner.init(fHandle, recordDescriptor, conditionAttribute, compOp, value, attributeNames);
+    }
 
-    RC RM_ScanIterator::close() { return -1; }
+    RC RM_ScanIterator::getNextTuple(RID &rid, void *data) {
+        return recordScanner.getNextRecord(rid, data);
+    }
+
+    RC RM_ScanIterator::close() {
+        return recordScanner.close();
+    }
 
     // Extra credit work
     RC RelationManager::dropAttribute(const std::string &tableName, const std::string &attributeName) {
