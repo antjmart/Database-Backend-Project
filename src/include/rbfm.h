@@ -2,7 +2,6 @@
 #define _rbfm_h_
 
 #include <vector>
-#include <unordered_set>
 #include "pfm.h"
 
 namespace PeterDB {
@@ -56,7 +55,7 @@ namespace PeterDB {
 
     class RBFM_ScanIterator {
         FileHandle & fileHandle;
-        std::vector<Attribute> & recordDescriptor;
+        std::vector<Attribute> recordDescriptor;
         std::string conditionAttribute;
         AttrLength conditionAttrLen;
         CompOp compOp;
