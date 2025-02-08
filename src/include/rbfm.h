@@ -54,7 +54,7 @@ namespace PeterDB {
     //  rbfmScanIterator.close();
 
     class RBFM_ScanIterator {
-        FileHandle & fileHandle;
+        FileHandle *fileHandle;
         std::vector<Attribute> recordDescriptor;
         std::string conditionAttribute;
         AttrLength conditionAttrLen;
@@ -63,7 +63,7 @@ namespace PeterDB {
         int valueInt;
         float valueReal;
         std::string valueString;
-        std::vector<std::string> & attributeNames;
+        std::vector<std::string> attributeNames;
         bool firstScan;
 
         bool acceptedRecord(const char * recordData, unsigned pageNum, unsigned short slotNum);
