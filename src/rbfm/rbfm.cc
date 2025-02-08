@@ -613,7 +613,9 @@ namespace PeterDB {
     }
 
     RC RBFM_ScanIterator::close() {
-        return RecordBasedFileManager::instance().closeFile(fileHandle);
+        RC closeStatus = RecordBasedFileManager::instance().closeFile(fileHandle);
+        delete &fileHandle;
+        return closeStatus;
     }
 
     bool RBFM_ScanIterator::compareInt(int conditionAttr) {
