@@ -47,6 +47,8 @@ namespace PeterDB {
     class RelationManager {
         std::vector<Attribute> tablesDescriptor;
         std::vector<Attribute> columnsDescriptor;
+        std::vector<std::string> columnsColumns;
+        int nextTableID;
 
     public:
         static RelationManager &instance();
