@@ -136,27 +136,110 @@ namespace PeterDB {
         return rbfm.closeFile(fh);
     }
 
-    RC RelationManager::deleteTable(const std::string &tableName) {
-        return -1;
-    }
-
-    RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs) {
+    RC RelationManager::getTableID(const std::string &tableName, int &tableID) {
         RM_ScanIterator scanner;
         std::string tables{"Tables"};
-        std::string columns{"Columns"};
         std::string table_name_field{"table-name"};
-        std::string columns_table_id{"table-id"};
 
         // first, scan through Tables table to get id of tableName
         std::vector<std::string> neededAttributes;
         neededAttributes.emplace_back("table-id");
         if (scan(tables, table_name_field, EQ_OP, tableName.c_str(), neededAttributes, scanner) == -1) return -1;
         RID rid;
-        char data[100];
+        char data[10];
         if (scanner.getNextTuple(rid, data) == RM_EOF) return -1;
-        int tableID;
         memmove(&tableID, data + 1, INT_BYTES);
+        return scanner.close();
+    }
+
+    RC RelationManager::getTableFileName(const std::string &tableName, std::string &fileName) {
+        RM_ScanIterator scanner;
+        std::string tables{"Tables"};
+        std::string table_name_field{"table-name"};
+
+        // first, scan through Tables table to get id of tableName
+        std::vector<std::string> neededAttributes;
+        neededAttributes.emplace_back("file-name");
+        if (scan(tables, table_name_field, EQ_OP, tableName.c_str(), neededAttributes, scanner) == -1) return -1;
+        RID rid;
+        char data[60];
+        if (scanner.getNextTuple(rid, data) == RM_EOF) return -1;
+
+        int fileNameLen;
+        memmove(&fileNameLen, data + 1, INT_BYTES);
+        char fname[fileNameLen + 1];
+        memmove(fname, data + (1 + INT_BYTES), fileNameLen);
+        fname[fileNameLen] = '\0';
+        fileName = fname;
+        return scanner.close();
+    }
+
+    RC RelationManager::getTableIdAndFileName(const std::string &tableName, int &tableID, std::string &fileName, bool deleteEntry) {
+        RM_ScanIterator scanner;
+        std::string tables{"Tables"};
+        std::string table_name_field{"table-name"};
+
+        // first, scan through Tables table to get id of tableName
+        std::vector<std::string> neededAttributes;
+        neededAttributes.emplace_back("table-id");
+        neededAttributes.emplace_back("file-name");
+        if (scan(tables, table_name_field, EQ_OP, tableName.c_str(), neededAttributes, scanner) == -1) return -1;
+        RID rid;
+        char data[70];
+        if (scanner.getNextTuple(rid, data) == RM_EOF) return -1;
+
+        memmove(&tableID, data + 1, INT_BYTES);
+        int fileNameLen;
+        memmove(&fileNameLen, data + (1 + INT_BYTES), INT_BYTES);
+        char fname[fileNameLen + 1];
+        memmove(fname, data + (1 + INT_BYTES + INT_BYTES), fileNameLen);
+        fname[fileNameLen] = '\0';
+        fileName = fname;
+
         if (scanner.close() == -1) return -1;
+        if (deleteEntry) {
+            FileHandle fh;
+            if (RecordBasedFileManager::instance().openFile(tables, fh) == -1) return -1;
+            return RecordBasedFileManager::instance().deleteRecord(fh, tablesDescriptor, rid);
+        }
+        return 0;
+    }
+
+    RC RelationManager::deleteTable(const std::string &tableName) {
+        RM_ScanIterator scanner;
+        std::string columns{"Columns"};
+        std::string columns_table_id{"table-id"};
+        int tableID;
+        std::string tableFile;
+        if (getTableIdAndFileName(tableName, tableID, tableFile, true) == -1) return -1;
+        RID rid;
+        char data[10];
+
+        // scan through the Columns table and delete all records associated to the table ID
+        std::vector<std::string> requestedAttributes;
+        requestedAttributes.emplace_back("table-id");
+        if (scan(columns, columns_table_id, EQ_OP, &tableID, requestedAttributes, scanner) == -1) return -1;
+
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        FileHandle fh;
+        if (rbfm.openFile(columns, fh) == -1) return -1;
+
+        while (scanner.getNextTuple(rid, data) != RM_EOF) {
+            if (rbfm.deleteRecord(fh, columnsDescriptor, rid) == -1) return -1;
+        }
+        if (rbfm.closeFile(fh) == -1) return -1;
+        if (scanner.close() == -1) return -1;
+        return RecordBasedFileManager::instance().destroyFile(tableFile);
+    }
+
+    RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs) {
+        RM_ScanIterator scanner;
+        std::string columns{"Columns"};
+        std::string columns_table_id{"table-id"};
+        int tableID;
+        if (getTableID(tableName, tableID) == -1) return -1;
+        RID rid;
+        char data[100];
 
         // now, scan through columns table searching for the table ID we now have
         if (scan(columns, columns_table_id, EQ_OP, &tableID, columnsColumns, scanner) == -1) return -1;
@@ -182,7 +265,7 @@ namespace PeterDB {
         }
         for (auto const & pair : attrOrdering)
             attrs.push_back(pair.second);
-        if (scanner.close() == -1) return -1;
+        return scanner.close();
     }
 
     RC RelationManager::insertTuple(const std::string &tableName, const void *data, RID &rid) {
@@ -217,7 +300,10 @@ namespace PeterDB {
                              const std::vector<std::string> &attributeNames,
                              RM_ScanIterator &rm_ScanIterator) {
         FileHandle *fh = new FileHandle();
-        if (RecordBasedFileManager::instance().openFile(tableName, *fh) == -1) return -1;
+        std::string fileName;
+        if (tableName == "Tables" || tableName == "Columns") fileName = tableName;
+        else {if (getTableFileName(tableName, fileName) == -1) return -1;}
+        if (RecordBasedFileManager::instance().openFile(fileName, *fh) == -1) return -1;
 
         std::vector<Attribute> attrs;
         if (tableName == "Tables") attrs = tablesDescriptor;
