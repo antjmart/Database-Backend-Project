@@ -119,9 +119,8 @@ namespace PeterDB {
         RC initColumnsTable(FileHandle &fh);
         RC addTablesEntry(FileHandle &fh, int table_id, int tableNameLen, const char *tableName, int fileNameLen, const char *fileName, int isSystem, char *data);
         RC addColumnsEntry(FileHandle &fh, int table_id, int nameLen, const char *name, AttrType columnType, int columnLen, int pos, char *data);
-        RC getTableID(const std::string &tableName, int &tableID);
-        RC getTableFileName(const std::string &tableName, std::string &fileName);
-        RC getTableIdAndFileName(const std::string &tableName, int &tableID, std::string &fileName, bool deleteEntry);
+        RC getTableID(const std::string &tableName, int &tableID, bool deleteEntry);
+        void formatString(const std::string &str, char *value);
     };
 
 } // namespace PeterDB

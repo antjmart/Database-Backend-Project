@@ -1,6 +1,8 @@
 #include "src/include/rm.h"
 #include <cstring>
 #include <map>
+#include <fstream>
+#include <iostream>
 
 constexpr int INT_BYTES = 4;
 constexpr int FLOAT_BYTES = 4;
@@ -98,6 +100,12 @@ namespace PeterDB {
         return rbfm.closeFile(fh);
     }
 
+    void RelationManager::formatString(const std::string &str, char *value) {
+        int len = str.size();
+        memmove(value, &len, INT_BYTES);
+        strcpy(value + INT_BYTES, str.c_str());
+    }
+
     RC RelationManager::createCatalog() {
         // create files to store records for Tables and Columns, error if either already exists
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
@@ -111,12 +119,21 @@ namespace PeterDB {
     }
 
     RC RelationManager::deleteCatalog() {
-        if (RecordBasedFileManager::instance().destroyFile("Tables") == -1) return -1;
-        return RecordBasedFileManager::instance().destroyFile("Columns");
+        RC status = 0;
+        if (RecordBasedFileManager::instance().destroyFile("Tables") == -1) status = -1;
+        if (RecordBasedFileManager::instance().destroyFile("Columns") == -1) status = -1;
+        return status;
     }
 
     RC RelationManager::createTable(const std::string &tableName, const std::vector<Attribute> &attrs) {
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        // verify Tables and Columns are present to be modified
+        std::ifstream ifs{"Tables"};
+        if (!ifs.is_open()) return -1;
+        ifs.close(); ifs.open("Columns");
+        if (!ifs.is_open()) return -1;
+        ifs.close();
+
         if (rbfm.createFile(tableName) == -1) return -1;  // error if table already exists
         FileHandle fh;
         char data[1024];
@@ -136,7 +153,7 @@ namespace PeterDB {
         return rbfm.closeFile(fh);
     }
 
-    RC RelationManager::getTableID(const std::string &tableName, int &tableID) {
+    RC RelationManager::getTableID(const std::string &tableName, int &tableID, bool deleteEntry) {
         RM_ScanIterator scanner;
         std::string tables{"Tables"};
         std::string table_name_field{"table-name"};
@@ -144,57 +161,13 @@ namespace PeterDB {
         // first, scan through Tables table to get id of tableName
         std::vector<std::string> neededAttributes;
         neededAttributes.emplace_back("table-id");
-        if (scan(tables, table_name_field, EQ_OP, tableName.c_str(), neededAttributes, scanner) == -1) return -1;
+        char value[tableName.size() + 1 + INT_BYTES];
+        formatString(tableName, value);
+        if (scan(tables, table_name_field, EQ_OP, value, neededAttributes, scanner) == -1) return -1;
         RID rid;
         char data[10];
         if (scanner.getNextTuple(rid, data) == RM_EOF) return -1;
         memmove(&tableID, data + 1, INT_BYTES);
-        return scanner.close();
-    }
-
-    RC RelationManager::getTableFileName(const std::string &tableName, std::string &fileName) {
-        RM_ScanIterator scanner;
-        std::string tables{"Tables"};
-        std::string table_name_field{"table-name"};
-
-        // first, scan through Tables table to get id of tableName
-        std::vector<std::string> neededAttributes;
-        neededAttributes.emplace_back("file-name");
-        if (scan(tables, table_name_field, EQ_OP, tableName.c_str(), neededAttributes, scanner) == -1) return -1;
-        RID rid;
-        char data[60];
-        if (scanner.getNextTuple(rid, data) == RM_EOF) return -1;
-
-        int fileNameLen;
-        memmove(&fileNameLen, data + 1, INT_BYTES);
-        char fname[fileNameLen + 1];
-        memmove(fname, data + (1 + INT_BYTES), fileNameLen);
-        fname[fileNameLen] = '\0';
-        fileName = fname;
-        return scanner.close();
-    }
-
-    RC RelationManager::getTableIdAndFileName(const std::string &tableName, int &tableID, std::string &fileName, bool deleteEntry) {
-        RM_ScanIterator scanner;
-        std::string tables{"Tables"};
-        std::string table_name_field{"table-name"};
-
-        // first, scan through Tables table to get id of tableName
-        std::vector<std::string> neededAttributes;
-        neededAttributes.emplace_back("table-id");
-        neededAttributes.emplace_back("file-name");
-        if (scan(tables, table_name_field, EQ_OP, tableName.c_str(), neededAttributes, scanner) == -1) return -1;
-        RID rid;
-        char data[70];
-        if (scanner.getNextTuple(rid, data) == RM_EOF) return -1;
-
-        memmove(&tableID, data + 1, INT_BYTES);
-        int fileNameLen;
-        memmove(&fileNameLen, data + (1 + INT_BYTES), INT_BYTES);
-        char fname[fileNameLen + 1];
-        memmove(fname, data + (1 + INT_BYTES + INT_BYTES), fileNameLen);
-        fname[fileNameLen] = '\0';
-        fileName = fname;
 
         if (scanner.close() == -1) return -1;
         if (deleteEntry) {
@@ -210,8 +183,7 @@ namespace PeterDB {
         std::string columns{"Columns"};
         std::string columns_table_id{"table-id"};
         int tableID;
-        std::string tableFile;
-        if (getTableIdAndFileName(tableName, tableID, tableFile, true) == -1) return -1;
+        if (getTableID(tableName, tableID, true) == -1) return -1;
         RID rid;
         char data[10];
 
@@ -237,7 +209,7 @@ namespace PeterDB {
         std::string columns{"Columns"};
         std::string columns_table_id{"table-id"};
         int tableID;
-        if (getTableID(tableName, tableID) == -1) return -1;
+        if (getTableID(tableName, tableID, false) == -1) return -1;
         RID rid;
         char data[100];
 
@@ -300,10 +272,7 @@ namespace PeterDB {
                              const std::vector<std::string> &attributeNames,
                              RM_ScanIterator &rm_ScanIterator) {
         FileHandle *fh = new FileHandle();
-        std::string fileName;
-        if (tableName == "Tables" || tableName == "Columns") fileName = tableName;
-        else {if (getTableFileName(tableName, fileName) == -1) return -1;}
-        if (RecordBasedFileManager::instance().openFile(fileName, *fh) == -1) return -1;
+        if (RecordBasedFileManager::instance().openFile(tableName, *fh) == -1) return -1;
 
         std::vector<Attribute> attrs;
         if (tableName == "Tables") attrs = tablesDescriptor;
