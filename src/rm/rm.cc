@@ -163,10 +163,10 @@ namespace PeterDB {
         neededAttributes.emplace_back("table-id");
         char value[tableName.size() + 1 + INT_BYTES];
         formatString(tableName, value);
-        if (scan(tables, table_name_field, EQ_OP, value, neededAttributes, scanner) == -1) return -1;
+        if (scan(tables, table_name_field, EQ_OP, value, neededAttributes, scanner) == -1) {scanner.close(); return -1;}
         RID rid;
         char data[10];
-        if (scanner.getNextTuple(rid, data) == RM_EOF) return -1;
+        if (scanner.getNextTuple(rid, data) == RM_EOF) {scanner.close(); return -1;}
         memmove(&tableID, data + 1, INT_BYTES);
 
         if (scanner.close() == -1) return -1;
@@ -190,7 +190,7 @@ namespace PeterDB {
         // scan through the Columns table and delete all records associated to the table ID
         std::vector<std::string> requestedAttributes;
         requestedAttributes.emplace_back("table-id");
-        if (scan(columns, columns_table_id, EQ_OP, &tableID, requestedAttributes, scanner) == -1) return -1;
+        if (scan(columns, columns_table_id, EQ_OP, &tableID, requestedAttributes, scanner) == -1) {scanner.close(); return -1;}
 
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
         std::vector<RID> recordsToDelete;
@@ -219,7 +219,7 @@ namespace PeterDB {
         char data[100];
 
         // now, scan through columns table searching for the table ID we now have
-        if (scan(columns, columns_table_id, EQ_OP, &tableID, columnsColumns, scanner) == -1) return -1;
+        if (scan(columns, columns_table_id, EQ_OP, &tableID, columnsColumns, scanner) == -1) {scanner.close(); return -1;}
         std::map<int, Attribute> attrOrdering;
         while (scanner.getNextTuple(rid, data) != RM_EOF) {
             char *ptr = data + (1 + INT_BYTES);
@@ -246,23 +246,51 @@ namespace PeterDB {
     }
 
     RC RelationManager::insertTuple(const std::string &tableName, const void *data, RID &rid) {
-        return -1;
+        std::vector<Attribute> recordDescriptor;
+        if (getAttributes(tableName, recordDescriptor) == -1) return -1;
+        FileHandle fh;
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        if (rbfm.openFile(tableName, fh) == -1) return -1;
+
+        if (rbfm.insertRecord(fh, recordDescriptor, data, rid) == -1) {rbfm.closeFile(fh); return -1;}
+        return rbfm.closeFile(fh);
     }
 
     RC RelationManager::deleteTuple(const std::string &tableName, const RID &rid) {
-        return -1;
+        std::vector<Attribute> recordDescriptor;
+        if (getAttributes(tableName, recordDescriptor) == -1) return -1;
+        FileHandle fh;
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        if (rbfm.openFile(tableName, fh) == -1) return -1;
+
+        if (rbfm.deleteRecord(fh, recordDescriptor, rid) == -1) {rbfm.closeFile(fh); return -1;}
+        return rbfm.closeFile(fh);
     }
 
     RC RelationManager::updateTuple(const std::string &tableName, const void *data, const RID &rid) {
-        return -1;
+        std::vector<Attribute> recordDescriptor;
+        if (getAttributes(tableName, recordDescriptor) == -1) return -1;
+        FileHandle fh;
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        if (rbfm.openFile(tableName, fh) == -1) return -1;
+
+        if (rbfm.updateRecord(fh, recordDescriptor, data, rid) == -1) {rbfm.closeFile(fh); return -1;}
+        return rbfm.closeFile(fh);
     }
 
     RC RelationManager::readTuple(const std::string &tableName, const RID &rid, void *data) {
-        return -1;
+        std::vector<Attribute> recordDescriptor;
+        if (getAttributes(tableName, recordDescriptor) == -1) return -1;
+        FileHandle fh;
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        if (rbfm.openFile(tableName, fh) == -1) return -1;
+
+        if (rbfm.readRecord(fh, recordDescriptor, rid, data) == -1) {rbfm.closeFile(fh); return -1;}
+        return rbfm.closeFile(fh);
     }
 
     RC RelationManager::printTuple(const std::vector<Attribute> &attrs, const void *data, std::ostream &out) {
-        return -1;
+        return RecordBasedFileManager::instance().printRecord(attrs, data, out);
     }
 
     RC RelationManager::readAttribute(const std::string &tableName, const RID &rid, const std::string &attributeName,
