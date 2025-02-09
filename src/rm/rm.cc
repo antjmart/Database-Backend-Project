@@ -153,7 +153,7 @@ namespace PeterDB {
         return rbfm.closeFile(fh);
     }
 
-    RC RelationManager::getTableID(const std::string &tableName, int &tableID, bool deleteEntry) {
+    RC RelationManager::getTableID(const std::string &tableName, int &tableID, bool deleteEntry, int *isSystemTable) {
         RM_ScanIterator scanner;
         std::string tables{"Tables"};
         std::string table_name_field{"table-name"};
@@ -161,13 +161,15 @@ namespace PeterDB {
         // first, scan through Tables table to get id of tableName
         std::vector<std::string> neededAttributes;
         neededAttributes.emplace_back("table-id");
+        neededAttributes.emplace_back("is-system-table");
         char value[tableName.size() + 1 + INT_BYTES];
         formatString(tableName, value);
         if (scan(tables, table_name_field, EQ_OP, value, neededAttributes, scanner) == -1) {scanner.close(); return -1;}
         RID rid;
-        char data[10];
+        char data[15];
         if (scanner.getNextTuple(rid, data) == RM_EOF) {scanner.close(); return -1;}
         memmove(&tableID, data + 1, INT_BYTES);
+        if (isSystemTable != nullptr) memmove(isSystemTable, data + (1 + INT_BYTES), INT_BYTES);
 
         if (scanner.close() == -1) return -1;
         if (deleteEntry) {
@@ -183,7 +185,7 @@ namespace PeterDB {
         std::string columns{"Columns"};
         std::string columns_table_id{"table-id"};
         int tableID;
-        if (getTableID(tableName, tableID, true) == -1) return -1;
+        if (getTableID(tableName, tableID, true, nullptr) == -1) return -1;
         RID rid;
         char data[10];
 
@@ -209,12 +211,12 @@ namespace PeterDB {
         return RecordBasedFileManager::instance().destroyFile(tableName);
     }
 
-    RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs) {
+    RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable) {
         RM_ScanIterator scanner;
         std::string columns{"Columns"};
         std::string columns_table_id{"table-id"};
         int tableID;
-        if (getTableID(tableName, tableID, false) == -1) return -1;
+        if (getTableID(tableName, tableID, false, isSystemTable) == -1) return -1;
         RID rid;
         char data[100];
 
@@ -247,7 +249,9 @@ namespace PeterDB {
 
     RC RelationManager::insertTuple(const std::string &tableName, const void *data, RID &rid) {
         std::vector<Attribute> recordDescriptor;
-        if (getAttributes(tableName, recordDescriptor) == -1) return -1;
+        int isSystemTable = 0;
+        if (getAttributes(tableName, recordDescriptor, &isSystemTable) == -1) return -1;
+        if (isSystemTable == 1) return -1;
         FileHandle fh;
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
         if (rbfm.openFile(tableName, fh) == -1) return -1;
@@ -258,7 +262,9 @@ namespace PeterDB {
 
     RC RelationManager::deleteTuple(const std::string &tableName, const RID &rid) {
         std::vector<Attribute> recordDescriptor;
-        if (getAttributes(tableName, recordDescriptor) == -1) return -1;
+        int isSystemTable = 0;
+        if (getAttributes(tableName, recordDescriptor, &isSystemTable) == -1) return -1;
+        if (isSystemTable == 1) return -1;
         FileHandle fh;
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
         if (rbfm.openFile(tableName, fh) == -1) return -1;
@@ -269,7 +275,9 @@ namespace PeterDB {
 
     RC RelationManager::updateTuple(const std::string &tableName, const void *data, const RID &rid) {
         std::vector<Attribute> recordDescriptor;
-        if (getAttributes(tableName, recordDescriptor) == -1) return -1;
+        int isSystemTable = 0;
+        if (getAttributes(tableName, recordDescriptor, &isSystemTable) == -1) return -1;
+        if (isSystemTable == 1) return -1;
         FileHandle fh;
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
         if (rbfm.openFile(tableName, fh) == -1) return -1;
@@ -312,8 +320,11 @@ namespace PeterDB {
                              const std::vector<std::string> &attributeNames,
                              RM_ScanIterator &rm_ScanIterator) {
         FileHandle *fh = new FileHandle();
-        if (RecordBasedFileManager::instance().openFile(tableName, *fh) == -1) return -1;
-
+        if (RecordBasedFileManager::instance().openFile(tableName, *fh) == -1) {
+            delete fh;
+            rm_ScanIterator.recordScanner.fileHandle = nullptr;
+            return -1;
+        }
         std::vector<Attribute> attrs;
         if (tableName == "Tables") attrs = tablesDescriptor;
         else if (tableName == "Columns") attrs = columnsDescriptor;
