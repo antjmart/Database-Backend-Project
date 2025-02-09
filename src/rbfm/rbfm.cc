@@ -541,11 +541,11 @@ namespace PeterDB {
         }
         if (attrIndex == recordDescriptor.size()) return -1;
 
-        SizeType nullFlagBytes = nullBytesNeeded(recordDescriptor.size());
+        SizeType nullFlagBytesBeforeAttr = nullBytesNeeded(attrIndex + 1) - 1;
         unsigned char nullByte;
-        memmove(&nullByte, pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytes / BITS_IN_BYTE), 1);
+        memmove(&nullByte, pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytesBeforeAttr), 1);
 
-        if (nullBitOn(nullByte, nullFlagBytes % BITS_IN_BYTE)) {
+        if (nullBitOn(nullByte, attrIndex % BITS_IN_BYTE + 1)) {
             memset(data, 1, 1);
             return 0;
         }
@@ -553,7 +553,7 @@ namespace PeterDB {
         data = static_cast<char *>(data) + 1;
 
         SizeType attrOffset;
-        memmove(&attrOffset, pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytes + BYTES_FOR_POINTER_TO_RECORD_FIELD * attrIndex), BYTES_FOR_POINTER_TO_RECORD_FIELD);
+        memmove(&attrOffset, pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullBytesNeeded(recordDescriptor.size()) + BYTES_FOR_POINTER_TO_RECORD_FIELD * attrIndex), BYTES_FOR_POINTER_TO_RECORD_FIELD);
         char * attrLocation = pageData + (recoOffset + attrOffset);
 
         if (attrType == TypeVarChar) {
@@ -616,6 +616,7 @@ namespace PeterDB {
         if (fileHandle == nullptr) return 0;
         RC closeStatus = RecordBasedFileManager::instance().closeFile(*fileHandle);
         delete fileHandle;
+        fileHandle = nullptr;
         return closeStatus;
     }
 
@@ -708,42 +709,42 @@ namespace PeterDB {
     }
 
     void RBFM_ScanIterator::extractRecordData(const char * recordData, void * data) {
-        const char *recordNullsPtr = recordData + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT;
-        const char *recordDirPtr = recordNullsPtr + RecordBasedFileManager::instance().nullBytesNeeded(recordDescriptor.size());
-        int attrNamesIndex = 0;
+        const char *recordDirPtr = recordData + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + RecordBasedFileManager::instance().nullBytesNeeded(recordDescriptor.size());
         unsigned char nullByte;
         SizeType newNullByteCount = RecordBasedFileManager::instance().nullBytesNeeded(attributeNames.size());
         unsigned char newNullBytes[newNullByteCount] = {0};
         char *dataPtr = static_cast<char *>(data) + newNullByteCount;
         SizeType attrOffset;
 
-        for (int recordDescIndex = 0; recordDescIndex < recordDescriptor.size() && attrNamesIndex < attributeNames.size(); ++recordDescIndex) {
-            if (recordDescIndex % BITS_IN_BYTE == 0) {
-                memmove(&nullByte, recordNullsPtr, 1);
-                ++recordNullsPtr;
-            }
-
-            if (recordDescriptor[recordDescIndex].name == attributeNames[attrNamesIndex]) {
-                if (RecordBasedFileManager::instance().nullBitOn(nullByte, recordDescIndex % BITS_IN_BYTE + 1))
-                    newNullBytes[attrNamesIndex / BITS_IN_BYTE] |= 1 << (BITS_IN_BYTE - attrNamesIndex % BITS_IN_BYTE - 1);
-                else {
-                    memmove(&attrOffset, recordDirPtr + BYTES_FOR_POINTER_TO_RECORD_FIELD * recordDescIndex, BYTES_FOR_POINTER_TO_RECORD_FIELD);
-
-                    if (recordDescriptor[recordDescIndex].type != TypeVarChar) {
-                        memmove(dataPtr, recordData + attrOffset, recordDescriptor[recordDescIndex].length);
-                        dataPtr += recordDescriptor[recordDescIndex].length;
-                    } else {
-                        // must get length value from varchar field to know needed space
-                        int varcharLen;
-                        memmove(&varcharLen, recordData + attrOffset, INT_BYTES);
-                        memmove(dataPtr, recordData + attrOffset, varcharLen + INT_BYTES);
-                        dataPtr += varcharLen + INT_BYTES;
-                    }
+        for (int attrNamesIndex = 0; attrNamesIndex < attributeNames.size(); attrNamesIndex++) {
+            const char *recordNullsPtr = recordData + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT;
+            for (int recordDescIndex = 0; recordDescIndex < recordDescriptor.size(); ++recordDescIndex) {
+                if (recordDescIndex % BITS_IN_BYTE == 0) {
+                    memmove(&nullByte, recordNullsPtr, 1);
+                    ++recordNullsPtr;
                 }
-                ++attrNamesIndex;
+
+                if (recordDescriptor[recordDescIndex].name == attributeNames[attrNamesIndex]) {
+                    if (RecordBasedFileManager::instance().nullBitOn(nullByte, recordDescIndex % BITS_IN_BYTE + 1))
+                        newNullBytes[attrNamesIndex / BITS_IN_BYTE] |= 1 << (BITS_IN_BYTE - attrNamesIndex % BITS_IN_BYTE - 1);
+                    else {
+                        memmove(&attrOffset, recordDirPtr + BYTES_FOR_POINTER_TO_RECORD_FIELD * recordDescIndex, BYTES_FOR_POINTER_TO_RECORD_FIELD);
+
+                        if (recordDescriptor[recordDescIndex].type != TypeVarChar) {
+                            memmove(dataPtr, recordData + attrOffset, recordDescriptor[recordDescIndex].length);
+                            dataPtr += recordDescriptor[recordDescIndex].length;
+                        } else {
+                            // must get length value from varchar field to know needed space
+                            int varcharLen;
+                            memmove(&varcharLen, recordData + attrOffset, INT_BYTES);
+                            memmove(dataPtr, recordData + attrOffset, varcharLen + INT_BYTES);
+                            dataPtr += varcharLen + INT_BYTES;
+                        }
+                    }
+                    break;
+                }
             }
         }
-
         memmove(data, newNullBytes, newNullByteCount);
     }
 

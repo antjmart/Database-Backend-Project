@@ -8,7 +8,7 @@
 struct tupleVal {
     int intVal;
     float floatVal;
-    const char *stringVal;
+    std::string stringVal;
     std::string type;
 
     explicit tupleVal(int i) : intVal(i), type("int") {}
@@ -22,7 +22,7 @@ namespace PeterDB {
     // RM_ScanIterator is an iterator to go through tuples
     class RM_ScanIterator {
         RBFM_ScanIterator recordScanner;
-        friend class RelationManager;
+
     public:
         RM_ScanIterator();
 
