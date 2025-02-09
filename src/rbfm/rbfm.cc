@@ -614,7 +614,7 @@ namespace PeterDB {
 
     RC RBFM_ScanIterator::close() {
         RC closeStatus = RecordBasedFileManager::instance().closeFile(*fileHandle);
-        delete &fileHandle;
+        delete fileHandle;
         return closeStatus;
     }
 
@@ -698,7 +698,7 @@ namespace PeterDB {
             int varcharLen;
             memmove(&varcharLen, conditionAttrVal + 1, INT_BYTES);
             char valString[varcharLen + 1];
-            memmove(valString, conditionAttrVal + INT_BYTES, varcharLen);
+            memmove(valString, conditionAttrVal + 1 + INT_BYTES, varcharLen);
             valString[varcharLen] = '\0';
             std::string attrVal{valString};
 
@@ -757,7 +757,7 @@ namespace PeterDB {
         } else {
             // will iterate from the most recently used rid
             currPageNum = rid.pageNum;
-            currSlotNum = rid.slotNum;
+            currSlotNum = rid.slotNum + 1;
         }
 
         char pageData[PAGE_SIZE];
@@ -765,7 +765,7 @@ namespace PeterDB {
         SizeType recoOffset, recoLen;
         unsigned char tombstoneCheck;
 
-        for (; currPageNum < fileHandle->pageCount; ++currPageNum, currSlotNum = 0) {
+        for (; currPageNum < fileHandle->pageCount; ++currPageNum, currSlotNum = 1) {
             if (fileHandle->readPage(currPageNum, pageData) == -1) return -1;
             RecordBasedFileManager::instance().getSlotCount(&currSlotCount, pageData);
 
