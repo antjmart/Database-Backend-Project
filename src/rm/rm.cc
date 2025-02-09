@@ -295,7 +295,14 @@ namespace PeterDB {
 
     RC RelationManager::readAttribute(const std::string &tableName, const RID &rid, const std::string &attributeName,
                                       void *data) {
-        return -1;
+        std::vector<Attribute> recordDescriptor;
+        if (getAttributes(tableName, recordDescriptor) == -1) return -1;
+        FileHandle fh;
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        if (rbfm.openFile(tableName, fh) == -1) return -1;
+
+        if (rbfm.readAttribute(fh, recordDescriptor, rid, attributeName, data) == -1) {rbfm.closeFile(fh); return -1;}
+        return rbfm.closeFile(fh);
     }
 
     RC RelationManager::scan(const std::string &tableName,
