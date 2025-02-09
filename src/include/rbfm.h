@@ -2,6 +2,7 @@
 #define _rbfm_h_
 
 #include <vector>
+#include <unordered_map>
 #include "pfm.h"
 
 namespace PeterDB {
@@ -55,6 +56,7 @@ namespace PeterDB {
 
     class RBFM_ScanIterator {
         FileHandle *fileHandle;
+        std::unordered_map<std::string, int> attrNameIndexes;
         std::vector<Attribute> recordDescriptor;
         std::string conditionAttribute;
         AttrLength conditionAttrLen;

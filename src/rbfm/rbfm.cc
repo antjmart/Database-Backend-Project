@@ -580,7 +580,10 @@ namespace PeterDB {
                                  const std::vector<std::string> &attributeNames) {
         // initialize main variables
         fileHandle = &fHandle;
+        attrNameIndexes.clear();
         this->recordDescriptor = recordDescriptor;
+        for (int i = 0; i < recordDescriptor.size(); ++i)
+            attrNameIndexes[recordDescriptor[i].name] = i;
         this->conditionAttribute = conditionAttribute;
         this->compOp = compOp;
         this->attributeNames = attributeNames;
@@ -709,39 +712,33 @@ namespace PeterDB {
     }
 
     void RBFM_ScanIterator::extractRecordData(const char * recordData, void * data) {
-        const char *recordDirPtr = recordData + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + RecordBasedFileManager::instance().nullBytesNeeded(recordDescriptor.size());
+        const char *recordNullsPtr = recordData + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT;
+        const char *recordDirPtr = recordNullsPtr + RecordBasedFileManager::instance().nullBytesNeeded(attrNameIndexes.size());
         unsigned char nullByte;
         SizeType newNullByteCount = RecordBasedFileManager::instance().nullBytesNeeded(attributeNames.size());
         unsigned char newNullBytes[newNullByteCount] = {0};
         char *dataPtr = static_cast<char *>(data) + newNullByteCount;
         SizeType attrOffset;
+        int recordDescIndex;
 
         for (int attrNamesIndex = 0; attrNamesIndex < attributeNames.size(); attrNamesIndex++) {
-            const char *recordNullsPtr = recordData + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT;
-            for (int recordDescIndex = 0; recordDescIndex < recordDescriptor.size(); ++recordDescIndex) {
-                if (recordDescIndex % BITS_IN_BYTE == 0) {
-                    memmove(&nullByte, recordNullsPtr, 1);
-                    ++recordNullsPtr;
-                }
+            recordDescIndex = attrNameIndexes[attributeNames[attrNamesIndex]];
+            memmove(&nullByte, recordNullsPtr + (recordDescIndex / BITS_IN_BYTE), 1);
 
-                if (recordDescriptor[recordDescIndex].name == attributeNames[attrNamesIndex]) {
-                    if (RecordBasedFileManager::instance().nullBitOn(nullByte, recordDescIndex % BITS_IN_BYTE + 1))
-                        newNullBytes[attrNamesIndex / BITS_IN_BYTE] |= 1 << (BITS_IN_BYTE - attrNamesIndex % BITS_IN_BYTE - 1);
-                    else {
-                        memmove(&attrOffset, recordDirPtr + BYTES_FOR_POINTER_TO_RECORD_FIELD * recordDescIndex, BYTES_FOR_POINTER_TO_RECORD_FIELD);
+            if (RecordBasedFileManager::instance().nullBitOn(nullByte, recordDescIndex % BITS_IN_BYTE + 1))
+                newNullBytes[attrNamesIndex / BITS_IN_BYTE] |= 1 << (BITS_IN_BYTE - attrNamesIndex % BITS_IN_BYTE - 1);
+            else {
+                memmove(&attrOffset, recordDirPtr + BYTES_FOR_POINTER_TO_RECORD_FIELD * recordDescIndex, BYTES_FOR_POINTER_TO_RECORD_FIELD);
 
-                        if (recordDescriptor[recordDescIndex].type != TypeVarChar) {
-                            memmove(dataPtr, recordData + attrOffset, recordDescriptor[recordDescIndex].length);
-                            dataPtr += recordDescriptor[recordDescIndex].length;
-                        } else {
-                            // must get length value from varchar field to know needed space
-                            int varcharLen;
-                            memmove(&varcharLen, recordData + attrOffset, INT_BYTES);
-                            memmove(dataPtr, recordData + attrOffset, varcharLen + INT_BYTES);
-                            dataPtr += varcharLen + INT_BYTES;
-                        }
-                    }
-                    break;
+                if (recordDescriptor[recordDescIndex].type != TypeVarChar) {
+                    memmove(dataPtr, recordData + attrOffset, recordDescriptor[recordDescIndex].length);
+                    dataPtr += recordDescriptor[recordDescIndex].length;
+                } else {
+                    // must get length value from varchar field to know needed space
+                    int varcharLen;
+                    memmove(&varcharLen, recordData + attrOffset, INT_BYTES);
+                    memmove(dataPtr, recordData + attrOffset, varcharLen + INT_BYTES);
+                    dataPtr += varcharLen + INT_BYTES;
                 }
             }
         }
