@@ -758,8 +758,8 @@ namespace PeterDB {
             firstScan = false;
         } else {
             // will iterate from the most recently used rid
-            currPageNum = rid.pageNum;
-            currSlotNum = rid.slotNum + 1;
+            currPageNum = lastPageNum;
+            currSlotNum = lastSlotNum + 1;
         }
 
         char pageData[PAGE_SIZE];
@@ -781,6 +781,8 @@ namespace PeterDB {
                     extractRecordData(pageData + recoOffset, data);
                     rid.pageNum = currPageNum;
                     rid.slotNum = currSlotNum;
+                    lastPageNum = currPageNum;
+                    lastSlotNum = currSlotNum;
                     return 0;
                 }
             }

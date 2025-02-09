@@ -65,6 +65,8 @@ namespace PeterDB {
         std::string valueString;
         std::vector<std::string> attributeNames;
         bool firstScan;
+        unsigned lastPageNum;
+        unsigned short lastSlotNum;
 
         bool acceptedRecord(const char * recordData, unsigned pageNum, unsigned short slotNum);
         void extractRecordData(const char * recordData, void * data);
