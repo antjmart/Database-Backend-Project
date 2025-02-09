@@ -54,7 +54,6 @@ namespace PeterDB {
     //  rbfmScanIterator.close();
 
     class RBFM_ScanIterator {
-        FileHandle *fileHandle;
         std::vector<Attribute> recordDescriptor;
         std::string conditionAttribute;
         AttrLength conditionAttrLen;
@@ -73,6 +72,7 @@ namespace PeterDB {
         bool compareVarchar(const std::string & conditionAttr);
 
     public:
+        FileHandle *fileHandle;
         RBFM_ScanIterator() = default;
 
         ~RBFM_ScanIterator() = default;
