@@ -22,6 +22,7 @@ namespace PeterDB {
     // RM_ScanIterator is an iterator to go through tuples
     class RM_ScanIterator {
         RBFM_ScanIterator recordScanner;
+        friend class RelationManager;
     public:
         RM_ScanIterator();
 
@@ -65,7 +66,7 @@ namespace PeterDB {
 
         RC deleteTable(const std::string &tableName);
 
-        RC getAttributes(const std::string &tableName, std::vector<Attribute> &attrs);
+        RC getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable = nullptr);
 
         RC insertTuple(const std::string &tableName, const void *data, RID &rid);
 
@@ -119,7 +120,7 @@ namespace PeterDB {
         RC initColumnsTable(FileHandle &fh);
         RC addTablesEntry(FileHandle &fh, int table_id, int tableNameLen, const char *tableName, int fileNameLen, const char *fileName, int isSystem, char *data);
         RC addColumnsEntry(FileHandle &fh, int table_id, int nameLen, const char *name, AttrType columnType, int columnLen, int pos, char *data);
-        RC getTableID(const std::string &tableName, int &tableID, bool deleteEntry);
+        RC getTableID(const std::string &tableName, int &tableID, bool deleteEntry, int *isSystemTable);
         void formatString(const std::string &str, char *value);
     };
 
