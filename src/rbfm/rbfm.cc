@@ -613,6 +613,7 @@ namespace PeterDB {
     }
 
     RC RBFM_ScanIterator::close() {
+        if (fileHandle == nullptr) return 0;
         RC closeStatus = RecordBasedFileManager::instance().closeFile(*fileHandle);
         delete fileHandle;
         return closeStatus;
