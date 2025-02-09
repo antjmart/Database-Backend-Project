@@ -193,15 +193,20 @@ namespace PeterDB {
         if (scan(columns, columns_table_id, EQ_OP, &tableID, requestedAttributes, scanner) == -1) return -1;
 
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        std::vector<RID> recordsToDelete;
+        while (scanner.getNextTuple(rid, data) != RM_EOF) {
+            recordsToDelete.push_back(rid);
+        }
+        if (scanner.close() == -1) return -1;
+
         FileHandle fh;
         if (rbfm.openFile(columns, fh) == -1) return -1;
-
-        while (scanner.getNextTuple(rid, data) != RM_EOF) {
-            if (rbfm.deleteRecord(fh, columnsDescriptor, rid) == -1) return -1;
+        for (auto recoid : recordsToDelete) {
+            if (rbfm.deleteRecord(fh, columnsDescriptor, recoid) == -1) return -1;
         }
         if (rbfm.closeFile(fh) == -1) return -1;
-        if (scanner.close() == -1) return -1;
-        return RecordBasedFileManager::instance().destroyFile(tableFile);
+
+        return RecordBasedFileManager::instance().destroyFile(tableName);
     }
 
     RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs) {
