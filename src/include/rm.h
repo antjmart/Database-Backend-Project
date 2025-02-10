@@ -127,7 +127,7 @@ namespace PeterDB {
         void formatString(const std::string &str, char *value);
         RC getSchemaVersionInfo(const std::string &tableName, int &tableID, int &version, int &pos, std::unordered_map<std::string, int> &names, std::unordered_set<int> &positions);
         void RelationManager::convertDataToCurrSchema(void *data, const std::vector<Attribute> &currDescriptor, const std::vector<Attribute> &recordDescriptor,
-                                                      const std::unordered_map<std::string, int> &currAttrPos, const std::unordered_map<std::string, int> &recoVersionAttrPos);
+                                                      std::unordered_map<std::string, int> &currAttrPos, std::unordered_map<std::string, int> &recoVersionAttrPos);
     };
 
 } // namespace PeterDB
