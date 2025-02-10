@@ -23,6 +23,9 @@ namespace PeterDB {
         columnsDescriptor.push_back(Attribute{"column-type", TypeInt, 4});
         columnsDescriptor.push_back(Attribute{"column-length", TypeInt, 4});
         columnsDescriptor.push_back(Attribute{"column-position", TypeInt, 4});
+        schemasDescriptor.push_back(Attribute{"table-id", TypeInt, 4});
+        schemasDescriptor.push_back(Attribute{"version", TypeInt, 4});
+        schemasDescriptor.push_back(Attribute{"fields", TypeVarChar, 100});
         columnsColumns.emplace_back("table-id");
         columnsColumns.emplace_back("column-name");
         columnsColumns.emplace_back("column-type");
@@ -70,6 +73,7 @@ namespace PeterDB {
 
         if (addTablesEntry(fh, 1, 6, "Tables", 6, "Tables", 1, data) == -1) return -1;
         if (addTablesEntry(fh, 2, 7, "Columns", 7, "Columns", 1, data) == -1) return -1;
+        if (addTablesEntry(fh, 3, 7, "Schemas", 7, "Schemas", 1, data) == -1) return -1;
 
         return rbfm.closeFile(fh);
     }
@@ -95,8 +99,18 @@ namespace PeterDB {
         if (addColumnsEntry(fh, 2, 11, "column-type", TypeInt, 4, 3, data) == -1) return -1;
         if (addColumnsEntry(fh, 2, 13, "column-length", TypeInt, 4, 4, data) == -1) return -1;
         if (addColumnsEntry(fh, 2, 15, "column-position", TypeInt, 4, 5, data) == -1) return -1;
+        if (addColumnsEntry(fh, 3, 8, "table-id", TypeInt, 4, 1, data) == -1) return -1;
+        if (addColumnsEntry(fh, 3, 7, "version", TypeInt, 4, 2, data) == -1) return -1;
+        if (addColumnsEntry(fh, 3, 6, "fields", TypeVarChar, 100, 3, data) == -1) return -1;
 
         return rbfm.closeFile(fh);
+    }
+
+    RC RelationManager::addSchemasEntry(FileHandle &fh, int table_id, int version, int fieldCount, const char *fields, char *data) {
+        std::vector<tupleVal> values{tupleVal{table_id}, tupleVal{version}, tupleVal{fieldCount}, tupleVal{fields}};
+        craftTupleData(data + 1, values);
+        RID rid;
+        return RecordBasedFileManager::instance().insertRecord(fh, columnsDescriptor, data, rid);
     }
 
     void RelationManager::formatString(const std::string &str, char *value) {
@@ -110,8 +124,9 @@ namespace PeterDB {
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
         if (rbfm.createFile("Tables") == -1) return -1;
         if (rbfm.createFile("Columns") == -1) return -1;
+        if (rbfm.createFile("Schemas") == -1) return -1;
         FileHandle fh;
-        nextTableID = 3;  // reset table ID tracker every time catalog is made
+        nextTableID = 4;  // reset table ID tracker every time catalog is made
 
         if (initTablesTable(fh) == -1) return -1;
         return initColumnsTable(fh);
@@ -121,6 +136,7 @@ namespace PeterDB {
         RC status = 0;
         if (RecordBasedFileManager::instance().destroyFile("Tables") == -1) status = -1;
         if (RecordBasedFileManager::instance().destroyFile("Columns") == -1) status = -1;
+        if (RecordBasedFileManager::instance().destroyFile("Schemas") == -1) status = -1;
         return status;
     }
 
@@ -131,11 +147,13 @@ namespace PeterDB {
         if (!ifs.is_open()) return -1;
         ifs.close(); ifs.open("Columns");
         if (!ifs.is_open()) return -1;
+        ifs.close(); ifs.open("Schemas");
+        if (!ifs.is_open()) return -1;
         ifs.close();
 
         if (rbfm.createFile(tableName) == -1) return -1;  // error if table already exists
         FileHandle fh;
-        char data[100];
+        char data[150];
         memset(data, 0, 1);
 
         if (rbfm.openFile("Tables", fh) == -1) return -1;
@@ -143,11 +161,17 @@ namespace PeterDB {
         if (rbfm.closeFile(fh) == -1) return -1;
 
         if (rbfm.openFile("Columns", fh) == -1) return -1;
+        char positions[attrs.size()];
         int pos = 1;
         for (Attribute attr : attrs) {
             if (addColumnsEntry(fh, nextTableID, attr.name.size(), attr.name.c_str(), attr.type,attr.length, pos, data) == -1) return -1;
+            positions[pos - 1] = static_cast<char>(pos);
             ++pos;
         }
+        if (rbfm.closeFile(fh) == -1) return -1;
+
+        if (rbfm.openFile("Schemas", fh) == -1) return -1;
+        if (addSchemasEntry(fh, nextTableID, 1, attrs.size(), positions, data) == -1) return -1;
         ++nextTableID;
         return rbfm.closeFile(fh);
     }
@@ -183,7 +207,8 @@ namespace PeterDB {
     RC RelationManager::deleteTable(const std::string &tableName) {
         RM_ScanIterator scanner;
         std::string columns{"Columns"};
-        std::string columns_table_id{"table-id"};
+        std::string schemas{"Schemas"};
+        std::string table_id_str{"table-id"};
         int tableID, isSystemTable;
         if (getTableID(tableName, tableID, true, &isSystemTable) == -1) return -1;
         if (isSystemTable == 1) return -1;
@@ -193,19 +218,30 @@ namespace PeterDB {
         // scan through the Columns table and delete all records associated to the table ID
         std::vector<std::string> requestedAttributes;
         requestedAttributes.emplace_back("table-id");
-        if (scan(columns, columns_table_id, EQ_OP, &tableID, requestedAttributes, scanner) == -1) {scanner.close(); return -1;}
+        if (scan(columns, table_id_str, EQ_OP, &tableID, requestedAttributes, scanner) == -1) {scanner.close(); return -1;}
 
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
         std::vector<RID> recordsToDelete;
-        while (scanner.getNextTuple(rid, data) != RM_EOF) {
+        while (scanner.getNextTuple(rid, data) != RM_EOF)
             recordsToDelete.push_back(rid);
-        }
         if (scanner.close() == -1) return -1;
 
         FileHandle fh;
         if (rbfm.openFile(columns, fh) == -1) return -1;
         for (auto recoid : recordsToDelete) {
             if (rbfm.deleteRecord(fh, columnsDescriptor, recoid) == -1) return -1;
+        }
+        if (rbfm.closeFile(fh) == -1) return -1;
+
+        if (scan(schemas, table_id_str, EQ_OP, &tableID, requestedAttributes, scanner) == -1) {scanner.close(); return -1;}
+        recordsToDelete.clear();
+        while (scanner.getNextTuple(rid, data) != RM_EOF)
+            recordsToDelete.push_back(rid);
+        if (scanner.close() == -1) return -1;
+
+        if (rbfm.openFile(schemas, fh) == -1) return -1;
+        for (auto recoid : recordsToDelete) {
+            if (rbfm.deleteRecord(fh, schemasDescriptor, recoid) == -1) return -1;
         }
         if (rbfm.closeFile(fh) == -1) return -1;
 
