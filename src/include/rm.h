@@ -52,6 +52,7 @@ namespace PeterDB {
     class RelationManager {
         std::vector<Attribute> tablesDescriptor;
         std::vector<Attribute> columnsDescriptor;
+        std::vector<Attribute> schemasDescriptor;
         std::vector<std::string> columnsColumns;
         int nextTableID;
 
@@ -120,6 +121,7 @@ namespace PeterDB {
         RC initColumnsTable(FileHandle &fh);
         RC addTablesEntry(FileHandle &fh, int table_id, int tableNameLen, const char *tableName, int fileNameLen, const char *fileName, int isSystem, char *data);
         RC addColumnsEntry(FileHandle &fh, int table_id, int nameLen, const char *name, AttrType columnType, int columnLen, int pos, char *data);
+        RC addSchemasEntry(FileHandle &fh, int table_id, int version, int fieldCount, const char *fields, char *data);
         RC getTableID(const std::string &tableName, int &tableID, bool deleteEntry, int *isSystemTable);
         void formatString(const std::string &str, char *value);
     };
