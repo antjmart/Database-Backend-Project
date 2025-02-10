@@ -248,7 +248,7 @@ namespace PeterDB {
         return RecordBasedFileManager::instance().destroyFile(tableName);
     }
 
-    RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable) {
+    RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable, int version, std::unordered_map<std::string, int> *attrPositions) {
         attrs = std::vector<Attribute>{};
         if (tableName == "Tables") {
             attrs = tablesDescriptor;
@@ -260,12 +260,24 @@ namespace PeterDB {
             if (isSystemTable) *isSystemTable = 1;
             return 0;
         }
+        if (tableName == "Schemas") {
+            attrs = schemasDescriptor;
+            if (isSystemTable) *isSystemTable = 1;
+            return 0;
+        }
+
+        std::unordered_set<int> positions;
+        std::unordered_map<std::string, int> placeHolder;
+        int tableID, lastPos;
+        if (attrPositions == nullptr) {
+            if (getSchemaVersionInfo(tableName, tableID, version, lastPos, placeHolder, positions) == -1) return -1;
+        } else {
+            if (getSchemaVersionInfo(tableName, tableID, version, lastPos, *attrPositions, positions) == -1) return -1;
+        }
 
         RM_ScanIterator scanner;
         std::string columns{"Columns"};
         std::string columns_table_id{"table-id"};
-        int tableID;
-        if (getTableID(tableName, tableID, false, isSystemTable) == -1) return -1;
         RID rid;
         char data[100];
 
@@ -289,7 +301,8 @@ namespace PeterDB {
             ptr += INT_BYTES;
             int pos;
             memmove(&pos, ptr, INT_BYTES);
-            attrOrdering[pos] = attr;
+            if (positions.find(pos) != positions.end())
+                attrOrdering[pos] = attr;
         }
         for (auto const & pair : attrOrdering)
             attrs.push_back(pair.second);
@@ -399,6 +412,7 @@ namespace PeterDB {
 
     // Extra credit work
     RC RelationManager::getSchemaVersionInfo(const std::string &tableName, int &tableID, int &version, int &pos, std::unordered_map<std::string, int> &names, std::unordered_set<int> &positions) {
+        bool specificVersion = version != 0;
         names.clear();
         positions.clear();
         if (getTableID(tableName, tableID, false, nullptr) == -1) return -1;
@@ -408,16 +422,24 @@ namespace PeterDB {
 
         char data[120];
         int numFields = -1;
-        int newestVersion = 0;
+        int newestVersion = specificVersion ? version : 0;
         char fields[110];
         RID rid;
 
         while (scanner.getNextTuple(rid, data) != RM_EOF) {
             memmove(&version, data + 1, INT_BYTES);
-            if (version > newestVersion) {
-                newestVersion = version;
-                memmove(&numFields, data + (1 + INT_BYTES), INT_BYTES);
-                strncpy(fields, data + (1 + INT_BYTES + INT_BYTES), numFields);
+            if (specificVersion) {
+                if (version == newestVersion) {
+                    memmove(&numFields, data + (1 + INT_BYTES), INT_BYTES);
+                    strncpy(fields, data + (1 + INT_BYTES + INT_BYTES), numFields);
+                    break;
+                }
+            } else {
+                if (version > newestVersion) {
+                    newestVersion = version;
+                    memmove(&numFields, data + (1 + INT_BYTES), INT_BYTES);
+                    strncpy(fields, data + (1 + INT_BYTES + INT_BYTES), numFields);
+                }
             }
         }
         if (scanner.close() == -1 || numFields == -1) return -1;
@@ -447,7 +469,7 @@ namespace PeterDB {
     RC RelationManager::dropAttribute(const std::string &tableName, const std::string &attributeName) {
         std::unordered_map<std::string, int> currVersionAttrs;
         std::unordered_set<int> currVersionPositions;
-        int currPos, currVersion, tableID;
+        int currPos, currVersion = 0, tableID;
         if (getSchemaVersionInfo(tableName, tableID, currVersion, currPos, currVersionAttrs, currVersionPositions) == -1) return -1;
         if (currVersionAttrs.find(attributeName) == currVersionAttrs.end()) return -1;  // cannot drop attribute that is not in schema
 
@@ -470,7 +492,7 @@ namespace PeterDB {
     RC RelationManager::addAttribute(const std::string &tableName, const Attribute &attr) {
         std::unordered_map<std::string, int> currVersionAttrs;
         std::unordered_set<int> currVersionPositions;
-        int currPos, currVersion, tableID;
+        int currPos, currVersion = 0, tableID;
         if (getSchemaVersionInfo(tableName, tableID, currVersion, currPos, currVersionAttrs, currVersionPositions) == -1) return -1;
         if (currVersionAttrs.find(attr.name) != currVersionAttrs.end()) return -1;  // attribute already in current schema
 
