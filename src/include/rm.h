@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <unordered_set>
 #include "src/include/rbfm.h"
 
 struct tupleVal {
@@ -124,6 +125,7 @@ namespace PeterDB {
         RC addSchemasEntry(FileHandle &fh, int table_id, int version, int fieldCount, const char *fields, char *data);
         RC getTableID(const std::string &tableName, int &tableID, bool deleteEntry, int *isSystemTable);
         void formatString(const std::string &str, char *value);
+        RC getSchemaVersionInfo(const std::string &tableName, int &tableID, int &version, int &pos, std::unordered_map<std::string, int> &names, std::unordered_set<int> &positions);
     };
 
 } // namespace PeterDB
