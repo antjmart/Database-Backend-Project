@@ -398,13 +398,98 @@ namespace PeterDB {
     }
 
     // Extra credit work
+    RC RelationManager::getSchemaVersionInfo(const std::string &tableName, int &tableID, int &version, int &pos, std::unordered_map<std::string, int> &names, std::unordered_set<int> &positions) {
+        names.clear();
+        positions.clear();
+        if (getTableID(tableName, tableID, false, nullptr) == -1) return -1;
+        RM_ScanIterator scanner;
+        std::vector<std::string> neededValues{"version", "fields"};
+        if (scan("Schemas", "table-id", EQ_OP, &tableID, neededValues, scanner) == -1) {scanner.close(); return -1;}
+
+        char data[120];
+        int numFields = -1;
+        int newestVersion = 0;
+        char fields[110];
+        RID rid;
+
+        while (scanner.getNextTuple(rid, data) != RM_EOF) {
+            memmove(&version, data + 1, INT_BYTES);
+            if (version > newestVersion) {
+                newestVersion = version;
+                memmove(&numFields, data + (1 + INT_BYTES), INT_BYTES);
+                strncpy(fields, data + (1 + INT_BYTES + INT_BYTES), numFields);
+            }
+        }
+        if (scanner.close() == -1 || numFields == -1) return -1;
+        version = newestVersion;
+        neededValues = {"column-name", "column-position"};
+        if (scan("Columns", "table-id", EQ_OP, &tableID, neededValues, scanner) == -1) {scanner.close(); return -1;}
+
+        for (int i = 0; i < numFields; ++i)
+            positions.insert(fields[i]);
+        int max_pos = 0;
+        int nameLen;
+
+        while (scanner.getNextTuple(rid, data) != RM_EOF) {
+            memmove(&nameLen, data + 1, INT_BYTES);
+            memmove(&pos, data + (1 + INT_BYTES + nameLen), INT_BYTES);
+            if (pos > max_pos)
+                max_pos = pos;
+            if (positions.find(pos) != positions.end()) {
+                data[1 + INT_BYTES + nameLen] = '\0';
+                names[data + (1 + INT_BYTES)] = pos;
+            }
+        }
+        pos = max_pos;
+        return scanner.close();
+    }
+
     RC RelationManager::dropAttribute(const std::string &tableName, const std::string &attributeName) {
-        return -1;
+        std::unordered_map<std::string, int> currVersionAttrs;
+        std::unordered_set<int> currVersionPositions;
+        int currPos, currVersion, tableID;
+        if (getSchemaVersionInfo(tableName, tableID, currVersion, currPos, currVersionAttrs, currVersionPositions) == -1) return -1;
+        if (currVersionAttrs.find(attributeName) == currVersionAttrs.end()) return -1;  // cannot drop attribute that is not in schema
+
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        FileHandle fh;
+
+        if (rbfm.openFile("Schemas", fh) == -1) return -1;
+        currVersionPositions.erase(currVersionPositions.find(currVersionAttrs[attributeName]));
+        char newPositions[currVersionPositions.size()];
+        int i = 0;
+        for (int newPos : currVersionPositions)
+            newPositions[i++] = static_cast<char>(newPos);
+        char data[150];
+        memset(data, 0, 1);
+        if (addSchemasEntry(fh, tableID, currVersion + 1, currVersionPositions.size(), newPositions, data) == -1) {rbfm.closeFile(fh); return -1;}
+        return rbfm.closeFile(fh);
     }
 
     // Extra credit work
     RC RelationManager::addAttribute(const std::string &tableName, const Attribute &attr) {
-        return -1;
+        std::unordered_map<std::string, int> currVersionAttrs;
+        std::unordered_set<int> currVersionPositions;
+        int currPos, currVersion, tableID;
+        if (getSchemaVersionInfo(tableName, tableID, currVersion, currPos, currVersionAttrs, currVersionPositions) == -1) return -1;
+        if (currVersionAttrs.find(attr.name) != currVersionAttrs.end()) return -1;  // attribute already in current schema
+
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        currVersionPositions.insert(currPos + 1);
+        FileHandle fh;
+        if (rbfm.openFile("Columns", fh) == -1) return -1;
+        char data[150];
+        memset(data, 0, 1);
+        if (addColumnsEntry(fh, tableID, attr.name.size(), attr.name.c_str(), attr.type, attr.length, currPos + 1, data) == -1) {rbfm.closeFile(fh); return -1;}
+        if (rbfm.closeFile(fh) == -1) return -1;
+
+        if (rbfm.openFile("Schemas", fh) == -1) return -1;
+        char newPositions[currVersionPositions.size()];
+        int i = 0;
+        for (int newPos : currVersionPositions)
+            newPositions[i++] = static_cast<char>(newPos);
+        if (addSchemasEntry(fh, tableID, currVersion + 1, currVersionPositions.size(), newPositions, data) == -1) {rbfm.closeFile(fh); return -1;}
+        return rbfm.closeFile(fh);
     }
 
     // QE IX related
