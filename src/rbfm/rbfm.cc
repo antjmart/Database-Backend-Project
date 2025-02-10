@@ -546,7 +546,7 @@ namespace PeterDB {
         memmove(&nullByte, pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytesBeforeAttr), 1);
 
         if (nullBitOn(nullByte, attrIndex % BITS_IN_BYTE + 1)) {
-            memset(data, 1, 1);
+            memset(data, 128, 1);
             return 0;
         }
         memset(data, 0, 1);
@@ -602,8 +602,10 @@ namespace PeterDB {
         // if value is integer or real, simply copy over the bytes from value array
         if (valueType == TypeInt)
             memmove(&valueInt, value, INT_BYTES);
-        else if (valueType == TypeReal)
+        else if (valueType == TypeReal) {
             memmove(&valueReal, value, INT_BYTES);
+            std::cout << "real val: " << valueReal << std::endl;
+        }
         else {
             // if value is varchar, get length of the character section, append null character, then convert into string object
             int varcharLen;
@@ -688,7 +690,7 @@ namespace PeterDB {
 
         unsigned char nullByte;
         memmove(&nullByte, conditionAttrVal, 1);
-        if (nullByte == 1) return false;
+        if (nullByte == 128) return false;
 
         if (valueType == TypeInt) {
             int attrVal;
