@@ -68,7 +68,7 @@ namespace PeterDB {
 
         RC deleteTable(const std::string &tableName);
 
-        RC getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable = nullptr, int version = 0, std::unordered_map<std::string, int> *attrPositions = nullptr);
+        RC getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable = nullptr, int *version = nullptr, std::unordered_map<std::string, int> *attrPositions = nullptr);
 
         RC insertTuple(const std::string &tableName, const void *data, RID &rid);
 
@@ -126,6 +126,8 @@ namespace PeterDB {
         RC getTableID(const std::string &tableName, int &tableID, bool deleteEntry, int *isSystemTable);
         void formatString(const std::string &str, char *value);
         RC getSchemaVersionInfo(const std::string &tableName, int &tableID, int &version, int &pos, std::unordered_map<std::string, int> &names, std::unordered_set<int> &positions);
+        void RelationManager::convertDataToCurrSchema(void *data, const std::vector<Attribute> &currDescriptor, const std::vector<Attribute> &recordDescriptor,
+                                                      const std::unordered_map<std::string, int> &currAttrPos, const std::unordered_map<std::string, int> &recoVersionAttrPos);
     };
 
 } // namespace PeterDB
