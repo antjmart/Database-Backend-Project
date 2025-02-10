@@ -90,7 +90,6 @@ namespace PeterDB {
         if (addColumnsEntry(fh, 1, 8, "table-id", TypeInt, 4, 1, data) == -1) return -1;
         if (addColumnsEntry(fh, 1, 10, "table-name", TypeVarChar, 50, 2, data) == -1) return -1;
         if (addColumnsEntry(fh, 1, 9, "file-name", TypeVarChar, 50, 3, data) == -1) return -1;
-        if (addColumnsEntry(fh, 1, 15, "is-system-table", TypeInt, 4, 4, data) == -1) return -1;
         if (addColumnsEntry(fh, 2, 8, "table-id", TypeInt, 4, 1, data) == -1) return -1;
         if (addColumnsEntry(fh, 2, 11, "column-name", TypeVarChar, 50, 2, data) == -1) return -1;
         if (addColumnsEntry(fh, 2, 11, "column-type", TypeInt, 4, 3, data) == -1) return -1;
@@ -136,7 +135,7 @@ namespace PeterDB {
 
         if (rbfm.createFile(tableName) == -1) return -1;  // error if table already exists
         FileHandle fh;
-        char data[1024];
+        char data[100];
         memset(data, 0, 1);
 
         if (rbfm.openFile("Tables", fh) == -1) return -1;
@@ -172,7 +171,7 @@ namespace PeterDB {
         if (isSystemTable != nullptr) memmove(isSystemTable, data + (1 + INT_BYTES), INT_BYTES);
 
         if (scanner.close() == -1) return -1;
-        if (deleteEntry) {
+        if (deleteEntry && isSystemTable && *isSystemTable == 0) {
             FileHandle fh;
             if (RecordBasedFileManager::instance().openFile(tables, fh) == -1) return -1;
             if (RecordBasedFileManager::instance().deleteRecord(fh, tablesDescriptor, rid) == -1) return -1;
@@ -215,6 +214,17 @@ namespace PeterDB {
 
     RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable) {
         attrs = std::vector<Attribute>{};
+        if (tableName == "Tables") {
+            attrs = tablesDescriptor;
+            if (isSystemTable) *isSystemTable = 1;
+            return 0;
+        }
+        if (tableName == "Columns") {
+            attrs = columnsDescriptor;
+            if (isSystemTable) *isSystemTable = 1;
+            return 0;
+        }
+
         RM_ScanIterator scanner;
         std::string columns{"Columns"};
         std::string columns_table_id{"table-id"};
@@ -329,9 +339,7 @@ namespace PeterDB {
         }
 
         std::vector<Attribute> attrs;
-        if (tableName == "Tables") attrs = tablesDescriptor;
-        else if (tableName == "Columns") attrs = columnsDescriptor;
-        else {if (getAttributes(tableName, attrs) == -1) return -1;}
+        if (getAttributes(tableName, attrs) == -1) return -1;
         rm_ScanIterator.init(*fh, attrs, conditionAttribute, compOp, value, attributeNames);
         return 0;
     }
