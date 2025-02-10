@@ -94,6 +94,7 @@ namespace PeterDB {
 
     class RecordBasedFileManager {
         friend class RBFM_ScanIterator;
+        friend class RelationManager;
 
     public:
         static RecordBasedFileManager &instance();                          // Access to the singleton instance
