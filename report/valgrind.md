@@ -47,4 +47,8 @@ to do with my code.
 
 RelationManager Tests Run with Valgrind Memcheck:
 
+![rmvalgrind.png](rmvalgrind.png)
 
+Clean memory usage, no lost bytes or lost allocations. Some warnings
+about mixing use of new and free operators in the provided testing library
+files, but nothing that my code has any impact on.
