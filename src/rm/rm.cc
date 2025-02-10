@@ -6,6 +6,7 @@
 
 constexpr int INT_BYTES = 4;
 constexpr int FLOAT_BYTES = 4;
+constexpr int BITS_PER_BYTE = 8;
 
 namespace PeterDB {
     RelationManager &RelationManager::instance() {
@@ -351,8 +352,64 @@ namespace PeterDB {
     }
 
     void RelationManager::convertDataToCurrSchema(void *data, const std::vector<Attribute> &currDescriptor, const std::vector<Attribute> &recordDescriptor,
-                                                const std::unordered_map<std::string, int> &currAttrPos, const std::unordered_map<std::string, int> &recoVersionAttrPos) {
-        return;
+                                                  std::unordered_map<std::string, int> &currAttrPos, std::unordered_map<std::string, int> &recoVersionAttrPos) {
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        char convertedData[PAGE_SIZE];
+        SizeType nullByteCount = rbfm.nullBytesNeeded(currDescriptor.size());
+        memset(convertedData, 0, nullByteCount);
+        char *convertedPtr = convertedData + nullByteCount;
+        const char *dataPtr = static_cast<const char *>(data) + rbfm.nullBytesNeeded(recordDescriptor.size());
+        int nullByteNum = 0;
+        int bitNum = 1;
+        int recoDescIndex = 0;
+        unsigned char dataNullByte;
+
+        for (const Attribute &neededAttr : currDescriptor) {
+            int neededPos = currAttrPos[neededAttr.name];
+
+            for (; recoDescIndex < recordDescriptor.size(); ++recoDescIndex) {
+                if (recoDescIndex % BITS_PER_BYTE == 0)
+                    memmove(&dataNullByte, static_cast<char *>(data) + recoDescIndex / BITS_PER_BYTE, 1);
+                Attribute recoAttr = recordDescriptor[recoDescIndex];
+                int recoAttrPos = recoVersionAttrPos[recoAttr.name];
+                if (recoAttrPos > neededPos) {
+                    convertedData[nullByteNum] |= 1 << (BITS_PER_BYTE - bitNum);
+                    break;
+                }
+
+                if (rbfm.nullBitOn(dataNullByte, recoDescIndex % BITS_PER_BYTE + 1)) {
+                    if (recoAttrPos == neededPos)
+                        convertedData[nullByteNum] |= 1 << (BITS_PER_BYTE - bitNum);
+                } else {
+                    if (recoAttr.type == TypeVarChar) {
+                        int varcharLen;
+                        memmove(&varcharLen, dataPtr, INT_BYTES);
+                        if (recoAttrPos == neededPos) {
+                            memmove(convertedPtr, dataPtr, INT_BYTES + varcharLen);
+                            convertedPtr += INT_BYTES + varcharLen;
+                        }
+                        dataPtr += INT_BYTES + varcharLen;
+                    } else {
+                        if (recoAttrPos == neededPos) {
+                            memmove(convertedPtr, dataPtr, recoAttr.length);
+                            convertedPtr += recoAttr.length;
+                        }
+                        dataPtr += recoAttr.length;
+                    }
+                }
+
+                if (recoAttrPos == neededPos) {
+                    ++recoDescIndex;
+                    break;
+                }
+            }
+
+            if (recoDescIndex == recordDescriptor.size())
+                convertedData[nullByteNum] |= 1 << (BITS_PER_BYTE - bitNum);
+            bitNum = bitNum % BITS_PER_BYTE + 1;
+            if (bitNum == 1) ++nullByteNum;
+        }
+        memmove(data, convertedData, convertedPtr - convertedData);
     }
 
     RC RelationManager::readTuple(const std::string &tableName, const RID &rid, void *data) {
@@ -374,7 +431,7 @@ namespace PeterDB {
             std::unordered_map<std::string, int> recordVersionAttrPos;
             if (getAttributes(tableName, recordDescriptor, nullptr, reinterpret_cast<int *>(&version), &recordVersionAttrPos) == -1) return -1;
             if (rbfm.readRecord(fh, recordDescriptor, rid, data) == -1) {rbfm.closeFile(fh); return -1;}
-            convertDataToCurrSchema(tableName, rid, data, version, currentDescriptor, attrToPos);
+            convertDataToCurrSchema(data, currentDescriptor, recordDescriptor, attrToPos, recordVersionAttrPos);
         }
 
         return rbfm.closeFile(fh);
