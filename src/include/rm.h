@@ -68,7 +68,7 @@ namespace PeterDB {
 
         RC deleteTable(const std::string &tableName);
 
-        RC getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable = nullptr);
+        RC getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable = nullptr, int version = 0, std::unordered_map<std::string, int> *attrPositions = nullptr);
 
         RC insertTuple(const std::string &tableName, const void *data, RID &rid);
 
