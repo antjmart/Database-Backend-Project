@@ -429,7 +429,7 @@ namespace PeterDB {
         } else {
             std::vector<Attribute> recordDescriptor;
             std::unordered_map<std::string, int> recordVersionAttrPos;
-            if (getAttributes(tableName, recordDescriptor, nullptr, reinterpret_cast<int *>(&version), &recordVersionAttrPos) == -1) return -1;
+            if (getAttributes(tableName, recordDescriptor, nullptr, reinterpret_cast<int *>(&version), &recordVersionAttrPos) == -1) {rbfm.closeFile(fh); return -1;}
             if (rbfm.readRecord(fh, recordDescriptor, rid, data) == -1) {rbfm.closeFile(fh); return -1;}
             convertDataToCurrSchema(data, currentDescriptor, recordDescriptor, attrToPos, recordVersionAttrPos);
         }
@@ -443,13 +443,30 @@ namespace PeterDB {
 
     RC RelationManager::readAttribute(const std::string &tableName, const RID &rid, const std::string &attributeName,
                                       void *data) {
-        std::vector<Attribute> recordDescriptor;
-        if (getAttributes(tableName, recordDescriptor) == -1) return -1;
+        std::vector<Attribute> currentDescriptor;
+        std::unordered_map<std::string, int> attrToPos;
+        int currVersion = 0;
+        if (getAttributes(tableName, currentDescriptor, nullptr, &currVersion, &attrToPos) == -1) return -1;
+
         FileHandle fh;
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
         if (rbfm.openFile(tableName, fh) == -1) return -1;
+        SizeType version;
+        if (rbfm.readAttribute(fh, currentDescriptor, rid, attributeName, data, &version) == -1) {rbfm.closeFile(fh); return -1;}
 
-        if (rbfm.readAttribute(fh, recordDescriptor, rid, attributeName, data) == -1) {rbfm.closeFile(fh); return -1;}
+        if (version == currVersion) {
+            if (rbfm.readAttribute(fh, currentDescriptor, rid, attributeName, data) == -1) {rbfm.closeFile(fh); return -1;}
+        } else {
+            std::vector<Attribute> recordDescriptor;
+            std::unordered_map<std::string, int> recordVersionAttrPos;
+            if (getAttributes(tableName, recordDescriptor, nullptr, reinterpret_cast<int *>(&version), &recordVersionAttrPos) == -1) {rbfm.closeFile(fh); return -1;}
+
+            if (recordVersionAttrPos.find(attributeName) != recordVersionAttrPos.end() && attrToPos[attributeName] == recordVersionAttrPos[attributeName]) {
+                if (rbfm.readAttribute(fh, recordDescriptor, rid, attributeName, data) == -1) {rbfm.closeFile(fh); return -1;}
+            } else
+                memset(data, 128, 1);
+        }
+
         return rbfm.closeFile(fh);
     }
 
@@ -466,8 +483,11 @@ namespace PeterDB {
         }
 
         std::vector<Attribute> attrs;
-        if (getAttributes(tableName, attrs) == -1) return -1;
-        rm_ScanIterator.init(*fh, attrs, conditionAttribute, compOp, value, attributeNames);
+        std::unordered_map<std::string, int> attrToPos;
+        int version = 0;
+        if (getAttributes(tableName, attrs, nullptr, &version, &attrToPos) == -1) return -1;
+        int pos = attrToPos.find(conditionAttribute) != attrToPos.end() ? attrToPos[conditionAttribute] : 0;
+        rm_ScanIterator.init(*fh, attrs, conditionAttribute, compOp, value, attributeNames, version, pos);
         return 0;
     }
 
@@ -476,7 +496,10 @@ namespace PeterDB {
     RM_ScanIterator::~RM_ScanIterator() = default;
 
     void RM_ScanIterator::init(FileHandle & fHandle, const std::vector<Attribute> &recordDescriptor, const std::string &conditionAttribute,
-                  const CompOp compOp, const void *value, const std::vector<std::string> &attributeNames) {
+                  const CompOp compOp, const void *value, const std::vector<std::string> &attributeNames, int version, int attrPos) {
+        schemaVersion = version;
+        attrDescriptor = recordDescriptor;
+        conditionAttrPos = attrPos;
         recordScanner.init(fHandle, recordDescriptor, conditionAttribute, compOp, value, attributeNames);
     }
 
