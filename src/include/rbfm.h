@@ -56,7 +56,6 @@ namespace PeterDB {
 
     class RBFM_ScanIterator {
         FileHandle *fileHandle;
-        std::unordered_map<std::string, int> attrNameIndexes;
         std::string conditionAttribute;
         AttrLength conditionAttrLen;
         CompOp compOp;
@@ -70,13 +69,14 @@ namespace PeterDB {
         unsigned short lastSlotNum;
 
         bool acceptedRecord(unsigned pageNum, unsigned short slotNum);
-        void extractRecordData(const char * recordData, void * data, SizeType *version);
+        void extractRecordData(const char * recordData, void * data);
         bool compareInt(int conditionAttr);
         bool compareReal(float conditionAttr);
         bool compareVarchar(const std::string & conditionAttr);
 
     public:
         std::vector<Attribute> recordDescriptor;
+        std::unordered_map<std::string, int> attrNameIndexes;
 
         RBFM_ScanIterator() : fileHandle(nullptr) {}
 
@@ -87,7 +87,7 @@ namespace PeterDB {
         // Never keep the results in the memory. When getNextRecord() is called,
         // a satisfying record needs to be fetched from the file.
         // "data" follows the same format as RecordBasedFileManager::insertRecord().
-        RC getNextRecord(RID &rid, void *data, SizeType *version = nullptr, bool *recoAccepted = nullptr);
+        RC getNextRecord(RID &rid, void *data, SizeType *version = nullptr, bool *recoAccepted = nullptr, bool *verifyRecord = nullptr);
 
         RC close();
     };
