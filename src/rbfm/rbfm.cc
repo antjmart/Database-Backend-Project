@@ -726,11 +726,7 @@ namespace PeterDB {
         }
     }
 
-    void RBFM_ScanIterator::extractRecordData(const char * recordData, void * data, SizeType *version) {
-        if (version != nullptr) {
-            memmove(version, recordData + TOMBSTONE_BYTE, BYTES_FOR_VERSION_NUM);
-            return;
-        }
+    void RBFM_ScanIterator::extractRecordData(const char * recordData, void * data) {
         const char *recordNullsPtr = recordData + BYTES_BEFORE_NULL_FLAGS;
         const char *recordDirPtr = recordNullsPtr + RecordBasedFileManager::instance().nullBytesNeeded(attrNameIndexes.size());
         unsigned char nullByte;
@@ -764,7 +760,7 @@ namespace PeterDB {
         memmove(data, newNullBytes, newNullByteCount);
     }
 
-    RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data, SizeType *version, bool *recoAccepted) {
+    RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data, SizeType *version, bool *recoAccepted, bool *verifyRecord) {
         unsigned currPageNum;
         unsigned short currSlotNum;
         if (firstScan) {
@@ -793,20 +789,29 @@ namespace PeterDB {
                 memmove(&tombstoneCheck, pageData + recoOffset, TOMBSTONE_BYTE);
                 if (tombstoneCheck == 1) continue;  // don't want to scan over tombstones, just real records
 
-                if (version == nullptr) {
-                    if (acceptedRecord(currPageNum, currSlotNum)) {
-                        extractRecordData(pageData + recoOffset, data, version);
-                        rid.pageNum = currPageNum;
-                        rid.slotNum = currSlotNum;
-                        if (recoAccepted) *recoAccepted = true;
-                    }
-                    if (recoAccepted) *recoAccepted = false;
+                if (version != nullptr) {
+                    memmove(version, pageData + (recoOffset + TOMBSTONE_BYTE), BYTES_FOR_VERSION_NUM);
                     lastPageNum = currPageNum;
                     lastSlotNum = currSlotNum;
-                } else {
-                    extractRecordData(pageData + recoOffset, data, version);
+                    return 0;
                 }
-                return 0;
+
+                if (verifyRecord != nullptr) {
+                    *recoAccepted = *verifyRecord && acceptedRecord(currPageNum, currSlotNum);
+                    if (*recoAccepted) extractRecordData(pageData + recoOffset, data);
+                    lastPageNum = currPageNum;
+                    lastSlotNum = currSlotNum;
+                    return 0;
+                }
+
+                if (acceptedRecord(currPageNum, currSlotNum)) {
+                    extractRecordData(pageData + recoOffset, data);
+                    rid.pageNum = currPageNum;
+                    rid.slotNum = currSlotNum;
+                    lastPageNum = currPageNum;
+                    lastSlotNum = currSlotNum;
+                    return 0;
+                }
             }
         }
 
