@@ -615,10 +615,8 @@ namespace PeterDB {
         // if value is integer or real, simply copy over the bytes from value array
         if (valueType == TypeInt)
             memmove(&valueInt, value, INT_BYTES);
-        else if (valueType == TypeReal) {
+        else if (valueType == TypeReal)
             memmove(&valueReal, value, INT_BYTES);
-            std::cout << "real val: " << valueReal << std::endl;
-        }
         else {
             // if value is varchar, get length of the character section, append null character, then convert into string object
             int varcharLen;
@@ -737,6 +735,10 @@ namespace PeterDB {
         int recordDescIndex;
 
         for (int attrNamesIndex = 0; attrNamesIndex < attributeNames.size(); attrNamesIndex++) {
+            if (attributeNames[attrNamesIndex].empty()) {
+                newNullBytes[attrNamesIndex / BITS_IN_BYTE] |= 1 << (BITS_IN_BYTE - attrNamesIndex % BITS_IN_BYTE - 1);
+                continue;
+            }
             recordDescIndex = attrNameIndexes[attributeNames[attrNamesIndex]];
             memmove(&nullByte, recordNullsPtr + (recordDescIndex / BITS_IN_BYTE), 1);
 
@@ -792,13 +794,17 @@ namespace PeterDB {
                 if (version != nullptr) {
                     memmove(version, pageData + (recoOffset + TOMBSTONE_BYTE), BYTES_FOR_VERSION_NUM);
                     lastPageNum = currPageNum;
-                    lastSlotNum = currSlotNum;
+                    lastSlotNum = currSlotNum - 1;
                     return 0;
                 }
 
                 if (verifyRecord != nullptr) {
                     *recoAccepted = *verifyRecord && acceptedRecord(currPageNum, currSlotNum);
-                    if (*recoAccepted) extractRecordData(pageData + recoOffset, data);
+                    if (*recoAccepted) {
+                        extractRecordData(pageData + recoOffset, data);
+                        rid.pageNum = currPageNum;
+                        rid.slotNum = currSlotNum;
+                    }
                     lastPageNum = currPageNum;
                     lastSlotNum = currSlotNum;
                     return 0;
