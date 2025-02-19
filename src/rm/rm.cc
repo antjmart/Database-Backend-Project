@@ -162,7 +162,8 @@ namespace PeterDB {
         if (rbfm.closeFile(fh) == -1) return -1;
 
         if (rbfm.openFile("Columns", fh) == -1) return -1;
-        char positions[attrs.size()];
+        char positions[attrs.size() + 1];
+        positions[attrs.size()] = '\0';
         int pos = 1;
         for (Attribute attr : attrs) {
             if (addColumnsEntry(fh, nextTableID, attr.name.size(), attr.name.c_str(), attr.type,attr.length, pos, data) == -1) return -1;
