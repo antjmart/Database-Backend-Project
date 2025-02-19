@@ -55,7 +55,10 @@ namespace PeterDB {
     //  rbfmScanIterator.close();
 
     class RBFM_ScanIterator {
+        friend class RM_ScanIterator;
         FileHandle *fileHandle;
+        std::vector<Attribute> recordDescriptor;
+        std::unordered_map<std::string, int> attrNameIndexes;
         std::string conditionAttribute;
         AttrLength conditionAttrLen;
         CompOp compOp;
@@ -75,9 +78,6 @@ namespace PeterDB {
         bool compareVarchar(const std::string & conditionAttr);
 
     public:
-        std::vector<Attribute> recordDescriptor;
-        std::unordered_map<std::string, int> attrNameIndexes;
-
         RBFM_ScanIterator() : fileHandle(nullptr) {}
 
         ~RBFM_ScanIterator() = default;
