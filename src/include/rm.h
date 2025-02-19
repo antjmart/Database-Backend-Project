@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <unordered_set>
 #include "src/include/rbfm.h"
 
 struct tupleVal {
@@ -22,14 +23,20 @@ namespace PeterDB {
     // RM_ScanIterator is an iterator to go through tuples
     class RM_ScanIterator {
         RBFM_ScanIterator recordScanner;
+        std::string tableName;
+        std::vector<Attribute> attrDescriptor;
+        std::unordered_map<std::string, int> attrPositions;
+        int schemaVersion;
+        std::string conditionAttrName;
+        CompOp comparator;
 
     public:
         RM_ScanIterator();
 
         ~RM_ScanIterator();
 
-        void init(FileHandle & fHandle, const std::vector<Attribute> &recordDescriptor, const std::string &conditionAttribute,
-                  const CompOp compOp, const void *value, const std::vector<std::string> &attributeNames);
+        void init(const std::string &tableName, FileHandle & fHandle, const std::vector<Attribute> &recordDescriptor, const std::string &conditionAttribute,
+                  const CompOp compOp, const void *value, const std::vector<std::string> &attributeNames, int version, const std::unordered_map<std::string, int> &attrToPos);
 
         // "data" follows the same format as RelationManager::insertTuple()
         RC getNextTuple(RID &rid, void *data);
@@ -52,8 +59,10 @@ namespace PeterDB {
     class RelationManager {
         std::vector<Attribute> tablesDescriptor;
         std::vector<Attribute> columnsDescriptor;
+        std::vector<Attribute> schemasDescriptor;
         std::vector<std::string> columnsColumns;
         int nextTableID;
+        friend class RM_ScanIterator;
 
     public:
         static RelationManager &instance();
@@ -66,7 +75,7 @@ namespace PeterDB {
 
         RC deleteTable(const std::string &tableName);
 
-        RC getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable = nullptr);
+        RC getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable = nullptr, int *version = nullptr, std::unordered_map<std::string, int> *attrPositions = nullptr);
 
         RC insertTuple(const std::string &tableName, const void *data, RID &rid);
 
@@ -120,8 +129,12 @@ namespace PeterDB {
         RC initColumnsTable(FileHandle &fh);
         RC addTablesEntry(FileHandle &fh, int table_id, int tableNameLen, const char *tableName, int fileNameLen, const char *fileName, int isSystem, char *data);
         RC addColumnsEntry(FileHandle &fh, int table_id, int nameLen, const char *name, AttrType columnType, int columnLen, int pos, char *data);
+        RC addSchemasEntry(FileHandle &fh, int table_id, int version, int fieldCount, const char *fields, char *data);
         RC getTableID(const std::string &tableName, int &tableID, bool deleteEntry, int *isSystemTable);
         void formatString(const std::string &str, char *value);
+        RC getSchemaVersionInfo(const std::string &tableName, int &tableID, int &version, int &pos, std::unordered_map<std::string, int> &names, std::unordered_set<int> &positions);
+        void convertDataToCurrSchema(void *data, const std::vector<Attribute> &currDescriptor, const std::vector<Attribute> &recordDescriptor,
+                                                      std::unordered_map<std::string, int> &currAttrPos, std::unordered_map<std::string, int> &recoVersionAttrPos);
     };
 
 } // namespace PeterDB

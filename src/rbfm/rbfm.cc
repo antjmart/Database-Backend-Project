@@ -5,7 +5,7 @@
 constexpr PeterDB::SizeType BYTES_FOR_SLOT_DIR_OFFSET = 2;
 constexpr PeterDB::SizeType BYTES_FOR_SLOT_DIR_LENGTH = 2;
 constexpr PeterDB::SizeType BYTES_FOR_SLOT_DIR_ENTRY = BYTES_FOR_SLOT_DIR_LENGTH + BYTES_FOR_SLOT_DIR_OFFSET;
-constexpr PeterDB::SizeType BYTES_FOR_RECORD_FIELD_COUNT = 4;
+constexpr PeterDB::SizeType BYTES_FOR_RECORD_FIELD_COUNT = 2;
 constexpr int INT_BYTES = 4;
 constexpr int BITS_IN_BYTE = 8;
 constexpr PeterDB::SizeType BYTES_FOR_POINTER_TO_RECORD_FIELD = 2;
@@ -16,6 +16,9 @@ constexpr PeterDB::SizeType TOMBSTONE_BYTE = 1;
 constexpr PeterDB::SizeType BYTES_FOR_PAGE_NUM = 4;
 constexpr PeterDB::SizeType BYTES_FOR_SLOT_NUM = 2;
 constexpr PeterDB::SizeType MAX_RECORD_SIZE = PAGE_SIZE - BYTES_FOR_PAGE_STATS - BYTES_FOR_SLOT_DIR_ENTRY;
+constexpr PeterDB::SizeType BYTES_FOR_VERSION_NUM = 2;
+constexpr PeterDB::SizeType BYTES_BEFORE_NULL_FLAGS = TOMBSTONE_BYTE + BYTES_FOR_VERSION_NUM + BYTES_FOR_RECORD_FIELD_COUNT;
+
 
 namespace PeterDB {
     RecordBasedFileManager &RecordBasedFileManager::instance() {
@@ -139,7 +142,7 @@ namespace PeterDB {
     SizeType RecordBasedFileManager::calcRecordSpace(const std::vector<Attribute> &recordDescriptor, const void * data) {
         // need bytes for record directory entry, for offset and length
         // need more for number of fields, and byte for tombstone check
-        SizeType recordSpace = BYTES_FOR_SLOT_DIR_ENTRY + BYTES_FOR_RECORD_FIELD_COUNT + TOMBSTONE_BYTE;
+        SizeType recordSpace = BYTES_FOR_SLOT_DIR_ENTRY + BYTES_BEFORE_NULL_FLAGS;
         SizeType nullFlagBytes = nullBytesNeeded(recordDescriptor.size());
         recordSpace += nullFlagBytes;
 
@@ -171,20 +174,22 @@ namespace PeterDB {
         return recordSpace;
     }
 
-    void RecordBasedFileManager::embedRecord(SizeType offset, const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData) {
+    void RecordBasedFileManager::embedRecord(SizeType offset, const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType version) {
         char * recoStart = static_cast<char *>(pageData) + offset;
         char * recoPos = recoStart;  // starting position of record entry in pageData
-        unsigned numFields = recordDescriptor.size();  // number of fields
+        unsigned short numFields = recordDescriptor.size();  // number of fields
         SizeType nullFlagBytes = nullBytesNeeded(numFields);  // number of bytes used for the null flags
 
         memset(recoPos, 0, TOMBSTONE_BYTE);  // set tombstone byte to zero
         ++recoPos;
+        memmove(recoPos, &version, BYTES_FOR_VERSION_NUM);
+        recoPos += BYTES_FOR_VERSION_NUM;
         memmove(recoPos, &numFields, BYTES_FOR_RECORD_FIELD_COUNT);  // first put number of fields
         recoPos += BYTES_FOR_RECORD_FIELD_COUNT;
         memmove(recoPos, data, nullFlagBytes);  // get null flag bits
         recoPos += nullFlagBytes;
 
-        SizeType currFieldOffset = TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytes + BYTES_FOR_POINTER_TO_RECORD_FIELD * numFields;  // field offsets go from record start
+        SizeType currFieldOffset = BYTES_BEFORE_NULL_FLAGS + nullFlagBytes + BYTES_FOR_POINTER_TO_RECORD_FIELD * numFields;  // field offsets go from record start
         long fieldsRemaining = numFields;
         SizeType dataPos = nullFlagBytes;  // this keeps track of how far into data byte stream to be
         unsigned char flagByte;
@@ -219,7 +224,7 @@ namespace PeterDB {
         }
     }
 
-    SizeType RecordBasedFileManager::putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace) {
+    SizeType RecordBasedFileManager::putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace, SizeType version) {
         SizeType initFreeSpace = PAGE_SIZE - recordSpace - BYTES_FOR_PAGE_STATS;  // bytes for N value and F value
         SizeType N = 1;
         setFreeSpaceAndSlotCount(&initFreeSpace, &N, pageData);  // adds N value for number of records, F value for free space
@@ -230,11 +235,11 @@ namespace PeterDB {
         setSlotOffsetAndLen(&offset, &length, 1, pageData);
 
         // record itself is placed into page
-        embedRecord(offset, recordDescriptor, data, pageData);
+        embedRecord(offset, recordDescriptor, data, pageData, version);
         return 1;
     }
 
-    SizeType RecordBasedFileManager::putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace) {
+    SizeType RecordBasedFileManager::putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace, SizeType version) {
         // get current free space value and N value
         SizeType freeSpace, N;
         getFreeSpaceAndSlotCount(&freeSpace, &N, pageData);
@@ -256,12 +261,12 @@ namespace PeterDB {
         setFreeSpaceAndSlotCount(&freeSpace, &N, pageData);
 
         // record itself is placed into page, return slot number
-        embedRecord(offset, recordDescriptor, data, pageData);
+        embedRecord(offset, recordDescriptor, data, pageData, version);
         return assignedSlot;
     }
 
     RC RecordBasedFileManager::insertRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
-                                            const void *data, RID &rid) {
+                                            const void *data, RID &rid, SizeType version) {
         char pageData[PAGE_SIZE];
         memset(pageData, 0, PAGE_SIZE);
         unsigned pageNum;  // page which record will be inserted to, starts with last page
@@ -271,7 +276,7 @@ namespace PeterDB {
 
         if (fileHandle.pageCount == 0) {
             pageNum = 0;  // no need to check pages
-            slotNum = putRecordInEmptyPage(recordDescriptor, data, pageData, recordSpace);
+            slotNum = putRecordInEmptyPage(recordDescriptor, data, pageData, recordSpace, version);
         } else {
             pageNum = fileHandle.pageCount - 1;
             if (fileHandle.readPage(pageNum, pageData) == -1) return -1;
@@ -291,9 +296,9 @@ namespace PeterDB {
 
             // now that pageNum is determined, must call function to construct new page data
             if (pageNum >= fileHandle.pageCount)
-                slotNum = putRecordInEmptyPage(recordDescriptor, data, pageData, recordSpace);
+                slotNum = putRecordInEmptyPage(recordDescriptor, data, pageData, recordSpace, version);
             else
-                slotNum = putRecordInNonEmptyPage(recordDescriptor, data, pageData, recordSpace);
+                slotNum = putRecordInNonEmptyPage(recordDescriptor, data, pageData, recordSpace, version);
         }
 
         // set the record id, then write back updated page with inserted record
@@ -345,13 +350,17 @@ namespace PeterDB {
     }
 
     RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
-                                          const RID &rid, void *data) {
+                                          const RID &rid, void *data, SizeType *version) {
         char pageData[PAGE_SIZE];
         unsigned short startingSlot = rid.slotNum;
         unsigned startingPage = rid.pageNum;
         SizeType recoOffset, recoLen;
         if (findRealRecord(fileHandle, pageData, startingPage, startingSlot, recoOffset, recoLen, false) == -1) return -1;
-        SizeType bytesFromStart = TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT;  // start looking after the initial values
+        SizeType bytesFromStart = BYTES_BEFORE_NULL_FLAGS;  // start looking after the initial values
+        if (version != nullptr) {
+            memmove(version, pageData + recoOffset + TOMBSTONE_BYTE, BYTES_FOR_VERSION_NUM);
+            return 0;
+        }
 
         // calculate number of null flag bytes, copy those bytes from the record
         SizeType nullFlagBytes = nullBytesNeeded(recordDescriptor.size());
@@ -479,7 +488,7 @@ namespace PeterDB {
     }
 
     RC RecordBasedFileManager::updateRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
-                                            const void *data, const RID &rid) {
+                                            const void *data, const RID &rid, SizeType version) {
         // get length of what new record will be for comparison to current record
         SizeType newRecoLen = calcRecordSpace(recordDescriptor, data) - BYTES_FOR_SLOT_DIR_ENTRY;
         if (newRecoLen > MAX_RECORD_SIZE) return -1;  // updated record cannot fit on a page
@@ -496,13 +505,13 @@ namespace PeterDB {
         if (newRecoLen < recoLen) {
             // updated record will be shorter, so shift page's records to the left
             shiftRecordsLeft(recoOffset + recoLen, recoLen - newRecoLen, pageData);
-            embedRecord(recoOffset, recordDescriptor, data, pageData);
+            embedRecord(recoOffset, recordDescriptor, data, pageData, version);
         } else if (newRecoLen > recoLen) {
             SizeType diff = newRecoLen - recoLen;
             if (diff <= freeSpace) {
                 // if there is enough free space, shift records over and put in updated record
                 shiftRecordsRight(recoOffset + recoLen, diff, pageData);
-                embedRecord(recoOffset, recordDescriptor, data, pageData);
+                embedRecord(recoOffset, recordDescriptor, data, pageData, version);
             } else {
                 // if not enough space, make this record a tombstone then put updated record on new page
                 RID newRid;
@@ -513,7 +522,7 @@ namespace PeterDB {
                 newRecoLen = recoLen;
             }
         } else
-            embedRecord(recoOffset, recordDescriptor, data, pageData);
+            embedRecord(recoOffset, recordDescriptor, data, pageData, version);
 
         setSlotLen(&newRecoLen, slotNum, pageData);
         RC writeStatus = fileHandle.writePage(pageNum, pageData);
@@ -521,12 +530,16 @@ namespace PeterDB {
     }
 
     RC RecordBasedFileManager::readAttribute(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
-                                             const RID &rid, const std::string &attributeName, void *data) {
+                                             const RID &rid, const std::string &attributeName, void *data, SizeType *version) {
         char pageData[PAGE_SIZE];
         unsigned short startingSlot = rid.slotNum;
         unsigned startingPage = rid.pageNum;
         SizeType recoOffset, recoLen;
         if (findRealRecord(fileHandle, pageData, startingPage, startingSlot, recoOffset, recoLen, false) == -1) return -1;
+        if (version != nullptr) {
+            memmove(version, pageData + recoOffset + TOMBSTONE_BYTE, BYTES_FOR_VERSION_NUM);
+            return 0;
+        }
 
         int attrIndex;
         AttrType attrType;
@@ -543,7 +556,7 @@ namespace PeterDB {
 
         SizeType nullFlagBytesBeforeAttr = nullBytesNeeded(attrIndex + 1) - 1;
         unsigned char nullByte;
-        memmove(&nullByte, pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullFlagBytesBeforeAttr), 1);
+        memmove(&nullByte, pageData + (recoOffset + BYTES_BEFORE_NULL_FLAGS + nullFlagBytesBeforeAttr), 1);
 
         if (nullBitOn(nullByte, attrIndex % BITS_IN_BYTE + 1)) {
             memset(data, 128, 1);
@@ -553,7 +566,7 @@ namespace PeterDB {
         data = static_cast<char *>(data) + 1;
 
         SizeType attrOffset;
-        memmove(&attrOffset, pageData + (recoOffset + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT + nullBytesNeeded(recordDescriptor.size()) + BYTES_FOR_POINTER_TO_RECORD_FIELD * attrIndex), BYTES_FOR_POINTER_TO_RECORD_FIELD);
+        memmove(&attrOffset, pageData + (recoOffset + BYTES_BEFORE_NULL_FLAGS + nullBytesNeeded(recordDescriptor.size()) + BYTES_FOR_POINTER_TO_RECORD_FIELD * attrIndex), BYTES_FOR_POINTER_TO_RECORD_FIELD);
         char * attrLocation = pageData + (recoOffset + attrOffset);
 
         if (attrType == TypeVarChar) {
@@ -602,10 +615,8 @@ namespace PeterDB {
         // if value is integer or real, simply copy over the bytes from value array
         if (valueType == TypeInt)
             memmove(&valueInt, value, INT_BYTES);
-        else if (valueType == TypeReal) {
+        else if (valueType == TypeReal)
             memmove(&valueReal, value, INT_BYTES);
-            std::cout << "real val: " << valueReal << std::endl;
-        }
         else {
             // if value is varchar, get length of the character section, append null character, then convert into string object
             int varcharLen;
@@ -682,7 +693,7 @@ namespace PeterDB {
         }
     }
 
-    bool RBFM_ScanIterator::acceptedRecord(const char * recordData, unsigned pageNum, unsigned short slotNum) {
+    bool RBFM_ScanIterator::acceptedRecord(unsigned pageNum, unsigned short slotNum) {
         if (compOp == NO_OP) return true;
         char conditionAttrVal[conditionAttrLen + INT_BYTES + 1];
         RID recordRid{pageNum, slotNum};
@@ -714,7 +725,7 @@ namespace PeterDB {
     }
 
     void RBFM_ScanIterator::extractRecordData(const char * recordData, void * data) {
-        const char *recordNullsPtr = recordData + TOMBSTONE_BYTE + BYTES_FOR_RECORD_FIELD_COUNT;
+        const char *recordNullsPtr = recordData + BYTES_BEFORE_NULL_FLAGS;
         const char *recordDirPtr = recordNullsPtr + RecordBasedFileManager::instance().nullBytesNeeded(attrNameIndexes.size());
         unsigned char nullByte;
         SizeType newNullByteCount = RecordBasedFileManager::instance().nullBytesNeeded(attributeNames.size());
@@ -724,6 +735,10 @@ namespace PeterDB {
         int recordDescIndex;
 
         for (int attrNamesIndex = 0; attrNamesIndex < attributeNames.size(); attrNamesIndex++) {
+            if (attributeNames[attrNamesIndex].empty()) {
+                newNullBytes[attrNamesIndex / BITS_IN_BYTE] |= 1 << (BITS_IN_BYTE - attrNamesIndex % BITS_IN_BYTE - 1);
+                continue;
+            }
             recordDescIndex = attrNameIndexes[attributeNames[attrNamesIndex]];
             memmove(&nullByte, recordNullsPtr + (recordDescIndex / BITS_IN_BYTE), 1);
 
@@ -747,7 +762,7 @@ namespace PeterDB {
         memmove(data, newNullBytes, newNullByteCount);
     }
 
-    RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data) {
+    RC RBFM_ScanIterator::getNextRecord(RID &rid, void *data, SizeType *version, bool *recoAccepted, bool *verifyRecord) {
         unsigned currPageNum;
         unsigned short currSlotNum;
         if (firstScan) {
@@ -776,7 +791,26 @@ namespace PeterDB {
                 memmove(&tombstoneCheck, pageData + recoOffset, TOMBSTONE_BYTE);
                 if (tombstoneCheck == 1) continue;  // don't want to scan over tombstones, just real records
 
-                if (acceptedRecord(pageData + recoOffset, currPageNum, currSlotNum)) {
+                if (version != nullptr) {
+                    memmove(version, pageData + (recoOffset + TOMBSTONE_BYTE), BYTES_FOR_VERSION_NUM);
+                    lastPageNum = currPageNum;
+                    lastSlotNum = currSlotNum - 1;
+                    return 0;
+                }
+
+                if (verifyRecord != nullptr) {
+                    *recoAccepted = *verifyRecord && acceptedRecord(currPageNum, currSlotNum);
+                    if (*recoAccepted) {
+                        extractRecordData(pageData + recoOffset, data);
+                        rid.pageNum = currPageNum;
+                        rid.slotNum = currSlotNum;
+                    }
+                    lastPageNum = currPageNum;
+                    lastSlotNum = currSlotNum;
+                    return 0;
+                }
+
+                if (acceptedRecord(currPageNum, currSlotNum)) {
                     extractRecordData(pageData + recoOffset, data);
                     rid.pageNum = currPageNum;
                     rid.slotNum = currSlotNum;

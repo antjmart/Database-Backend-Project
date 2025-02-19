@@ -55,9 +55,10 @@ namespace PeterDB {
     //  rbfmScanIterator.close();
 
     class RBFM_ScanIterator {
+        friend class RM_ScanIterator;
         FileHandle *fileHandle;
-        std::unordered_map<std::string, int> attrNameIndexes;
         std::vector<Attribute> recordDescriptor;
+        std::unordered_map<std::string, int> attrNameIndexes;
         std::string conditionAttribute;
         AttrLength conditionAttrLen;
         CompOp compOp;
@@ -70,7 +71,7 @@ namespace PeterDB {
         unsigned lastPageNum;
         unsigned short lastSlotNum;
 
-        bool acceptedRecord(const char * recordData, unsigned pageNum, unsigned short slotNum);
+        bool acceptedRecord(unsigned pageNum, unsigned short slotNum);
         void extractRecordData(const char * recordData, void * data);
         bool compareInt(int conditionAttr);
         bool compareReal(float conditionAttr);
@@ -86,13 +87,14 @@ namespace PeterDB {
         // Never keep the results in the memory. When getNextRecord() is called,
         // a satisfying record needs to be fetched from the file.
         // "data" follows the same format as RecordBasedFileManager::insertRecord().
-        RC getNextRecord(RID &rid, void *data);
+        RC getNextRecord(RID &rid, void *data, SizeType *version = nullptr, bool *recoAccepted = nullptr, bool *verifyRecord = nullptr);
 
         RC close();
     };
 
     class RecordBasedFileManager {
         friend class RBFM_ScanIterator;
+        friend class RelationManager;
 
     public:
         static RecordBasedFileManager &instance();                          // Access to the singleton instance
@@ -122,11 +124,11 @@ namespace PeterDB {
 
         // Insert a record into a file
         RC insertRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const void *data,
-                        RID &rid);
+                        RID &rid, SizeType version = 1);
 
         // Read a record identified by the given rid.
         RC
-        readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const RID &rid, void *data);
+        readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const RID &rid, void *data, SizeType *version = nullptr);
 
         // Print the record that is passed to this utility method.
         // This method will be mainly used for debugging/testing.
@@ -145,11 +147,11 @@ namespace PeterDB {
 
         // Assume the RID does not change after an update
         RC updateRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const void *data,
-                        const RID &rid);
+                        const RID &rid, SizeType version = 1);
 
         // Read an attribute given its name and the rid.
         RC readAttribute(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor, const RID &rid,
-                         const std::string &attributeName, void *data);
+                         const std::string &attributeName, void *data, SizeType *version = nullptr);
 
         // Scan returns an iterator to allow the caller to go through the results one by one.
         RC scan(FileHandle &fileHandle,
@@ -168,9 +170,9 @@ namespace PeterDB {
 
         // helper functions for insertRecord method
         SizeType calcRecordSpace(const std::vector<Attribute> &recordDescriptor, const void * data);
-        SizeType putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace);
-        SizeType putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace);
-        void embedRecord(SizeType offset, const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData);
+        SizeType putRecordInEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace, SizeType version);
+        SizeType putRecordInNonEmptyPage(const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType recordSpace, SizeType version);
+        void embedRecord(SizeType offset, const std::vector<Attribute> &recordDescriptor, const void * data, void * pageData, SizeType version);
         void getFreeSpace(SizeType * freeSpace, const void * pageData);
         void setFreeSpace(SizeType * freeSpace, void * pageData);
         void setSlotCount(SizeType * slotCount, void * pageData);
