@@ -111,13 +111,13 @@ namespace PeterDB {
         std::vector<tupleVal> values{tupleVal{table_id}, tupleVal{version}, tupleVal{fieldCount}, tupleVal{fields}};
         craftTupleData(data + 1, values);
         RID rid;
-        return RecordBasedFileManager::instance().insertRecord(fh, columnsDescriptor, data, rid);
+        return RecordBasedFileManager::instance().insertRecord(fh, schemasDescriptor, data, rid);
     }
 
     void RelationManager::formatString(const std::string &str, char *value) {
         int len = str.size();
         memmove(value, &len, INT_BYTES);
-        strcpy(value + INT_BYTES, str.c_str());
+        memmove(value + INT_BYTES, str.c_str(), len);
     }
 
     RC RelationManager::createCatalog() {
@@ -186,7 +186,7 @@ namespace PeterDB {
         std::vector<std::string> neededAttributes;
         neededAttributes.emplace_back("table-id");
         neededAttributes.emplace_back("is-system-table");
-        char value[tableName.size() + 1 + INT_BYTES];
+        char value[tableName.size() + INT_BYTES];
         formatString(tableName, value);
         if (scan(tables, table_name_field, EQ_OP, value, neededAttributes, scanner) == -1) {scanner.close(); return -1;}
         RID rid;
@@ -251,18 +251,18 @@ namespace PeterDB {
 
     RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable, int *version, std::unordered_map<std::string, int> *attrPositions) {
         attrs = std::vector<Attribute>{};
-        if (tableName == "Tables") {
-            attrs = tablesDescriptor;
-            if (isSystemTable) *isSystemTable = 1;
-            return 0;
-        }
-        if (tableName == "Columns") {
-            attrs = columnsDescriptor;
-            if (isSystemTable) *isSystemTable = 1;
-            return 0;
-        }
-        if (tableName == "Schemas") {
-            attrs = schemasDescriptor;
+        if (tableName == "Tables" || tableName == "Columns" || tableName == "Schemas") {
+            if (tableName == "Tables") attrs = tablesDescriptor;
+            else if (tableName == "Columns") attrs = columnsDescriptor;
+            else if (tableName == "Schemas") attrs = schemasDescriptor;
+
+            if (attrPositions) {
+                attrPositions->clear();
+                for (int i = 0; i < attrs.size(); ++i) {
+                    (*attrPositions)[attrs[i].name] = i + 1;
+                }
+            }
+            if (version) *version = 1;
             if (isSystemTable) *isSystemTable = 1;
             return 0;
         }
@@ -366,6 +366,7 @@ namespace PeterDB {
 
         for (const Attribute &neededAttr : currDescriptor) {
             int neededPos = currAttrPos[neededAttr.name];
+            bool loopBroken = false;
 
             for (; recoDescIndex < recordDescriptor.size(); ++recoDescIndex) {
                 if (recoDescIndex % BITS_PER_BYTE == 0)
@@ -374,6 +375,7 @@ namespace PeterDB {
                 int recoAttrPos = recoVersionAttrPos[recoAttr.name];
                 if (recoAttrPos > neededPos) {
                     convertedData[nullByteNum] |= 1 << (BITS_PER_BYTE - bitNum);
+                    loopBroken = true;
                     break;
                 }
 
@@ -400,11 +402,12 @@ namespace PeterDB {
 
                 if (recoAttrPos == neededPos) {
                     ++recoDescIndex;
+                    loopBroken = true;
                     break;
                 }
             }
 
-            if (recoDescIndex == recordDescriptor.size())
+            if (recoDescIndex == recordDescriptor.size() && !loopBroken)
                 convertedData[nullByteNum] |= 1 << (BITS_PER_BYTE - bitNum);
             bitNum = bitNum % BITS_PER_BYTE + 1;
             if (bitNum == 1) ++nullByteNum;
@@ -417,7 +420,6 @@ namespace PeterDB {
         std::unordered_map<std::string, int> attrToPos;
         int currVersion = 0;
         if (getAttributes(tableName, currentDescriptor, nullptr, &currVersion, &attrToPos) == -1) return -1;
-
         FileHandle fh;
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
         if (rbfm.openFile(tableName, fh) == -1) return -1;
@@ -429,7 +431,8 @@ namespace PeterDB {
         } else {
             std::vector<Attribute> recordDescriptor;
             std::unordered_map<std::string, int> recordVersionAttrPos;
-            if (getAttributes(tableName, recordDescriptor, nullptr, reinterpret_cast<int *>(&version), &recordVersionAttrPos) == -1) {rbfm.closeFile(fh); return -1;}
+            int versionInt = static_cast<int>(version);
+            if (getAttributes(tableName, recordDescriptor, nullptr, &versionInt, &recordVersionAttrPos) == -1) {rbfm.closeFile(fh); return -1;}
             if (rbfm.readRecord(fh, recordDescriptor, rid, data) == -1) {rbfm.closeFile(fh); return -1;}
             convertDataToCurrSchema(data, currentDescriptor, recordDescriptor, attrToPos, recordVersionAttrPos);
         }
@@ -459,7 +462,8 @@ namespace PeterDB {
         } else {
             std::vector<Attribute> recordDescriptor;
             std::unordered_map<std::string, int> recordVersionAttrPos;
-            if (getAttributes(tableName, recordDescriptor, nullptr, reinterpret_cast<int *>(&version), &recordVersionAttrPos) == -1) {rbfm.closeFile(fh); return -1;}
+            int versionInt = static_cast<int>(version);
+            if (getAttributes(tableName, recordDescriptor, nullptr, &versionInt, &recordVersionAttrPos) == -1) {rbfm.closeFile(fh); return -1;}
 
             if (recordVersionAttrPos.find(attributeName) != recordVersionAttrPos.end() && attrToPos[attributeName] == recordVersionAttrPos[attributeName]) {
                 if (rbfm.readAttribute(fh, recordDescriptor, rid, attributeName, data) == -1) {rbfm.closeFile(fh); return -1;}
@@ -486,8 +490,7 @@ namespace PeterDB {
         std::unordered_map<std::string, int> attrToPos;
         int version = 0;
         if (getAttributes(tableName, attrs, nullptr, &version, &attrToPos) == -1) return -1;
-        int pos = attrToPos.find(conditionAttribute) != attrToPos.end() ? attrToPos[conditionAttribute] : 0;
-        rm_ScanIterator.init(*fh, attrs, conditionAttribute, compOp, value, attributeNames, version, pos);
+        rm_ScanIterator.init(tableName, *fh, attrs, conditionAttribute, compOp, value, attributeNames, version, attrToPos);
         return 0;
     }
 
@@ -495,16 +498,48 @@ namespace PeterDB {
 
     RM_ScanIterator::~RM_ScanIterator() = default;
 
-    void RM_ScanIterator::init(FileHandle & fHandle, const std::vector<Attribute> &recordDescriptor, const std::string &conditionAttribute,
-                  const CompOp compOp, const void *value, const std::vector<std::string> &attributeNames, int version, int attrPos) {
+    void RM_ScanIterator::init(const std::string &tableName, FileHandle & fHandle, const std::vector<Attribute> &recordDescriptor, const std::string &conditionAttribute,
+                  const CompOp compOp, const void *value, const std::vector<std::string> &attributeNames, int version, const std::unordered_map<std::string, int> &attrToPos) {
+        this->tableName = tableName;
+        comparator = compOp;
         schemaVersion = version;
         attrDescriptor = recordDescriptor;
-        conditionAttrPos = attrPos;
+        attrPositions = attrToPos;
+        conditionAttrName = conditionAttribute;
         recordScanner.init(fHandle, recordDescriptor, conditionAttribute, compOp, value, attributeNames);
     }
 
     RC RM_ScanIterator::getNextTuple(RID &rid, void *data) {
-        return recordScanner.getNextRecord(rid, data);
+        SizeType nextRecoVersion;
+        bool recoAccepted, verifyRecord;
+
+        while (true) {
+            if (recordScanner.getNextRecord(rid, data, &nextRecoVersion) == -1) return -1;
+
+            if (nextRecoVersion == schemaVersion) {
+                recordScanner.recordDescriptor = attrDescriptor;
+                recordScanner.attrNameIndexes.clear();
+                for (int i = 0; i < attrDescriptor.size(); ++i)
+                    recordScanner.attrNameIndexes[attrDescriptor[i].name] = i;
+                verifyRecord = true;
+            } else {
+                std::vector<Attribute> recoDescriptor;
+                std::unordered_map<std::string, int> recoAttrToPos;
+                int nextRecoVersionInt = static_cast<int>(nextRecoVersion);
+                if (RelationManager::instance().getAttributes(tableName, recoDescriptor, nullptr, &nextRecoVersionInt, &recoAttrToPos) == -1) return -1;
+                recordScanner.attrNameIndexes.clear();
+                for (int i = 0; i < recoDescriptor.size(); ++i)
+                    recordScanner.attrNameIndexes[recoDescriptor[i].name] = i;
+                verifyRecord = (comparator == NO_OP) || (recoAttrToPos.find(conditionAttrName) != recoAttrToPos.end() && recoAttrToPos[conditionAttrName] == attrPositions[conditionAttrName]);
+                for (std::string &aname : recordScanner.attributeNames) {
+                    if (recoAttrToPos.find(aname) == recoAttrToPos.end() || recoAttrToPos[aname] != attrPositions[aname])
+                        aname.clear();
+                }
+            }
+
+            if (recordScanner.getNextRecord(rid, data, nullptr, &recoAccepted, &verifyRecord) == -1) return -1;
+            if (recoAccepted) return 0;
+        }
     }
 
     RC RM_ScanIterator::close() {
@@ -516,7 +551,9 @@ namespace PeterDB {
         bool specificVersion = version != 0;
         names.clear();
         positions.clear();
-        if (getTableID(tableName, tableID, false, nullptr) == -1) return -1;
+        int isSystemTable = 0;
+        if (getTableID(tableName, tableID, false, &isSystemTable) == -1) return -1;
+        if (isSystemTable == 1) return -1;
         RM_ScanIterator scanner;
         std::vector<std::string> neededValues{"version", "fields"};
         if (scan("Schemas", "table-id", EQ_OP, &tableID, neededValues, scanner) == -1) {scanner.close(); return -1;}
@@ -524,7 +561,7 @@ namespace PeterDB {
         char data[120];
         int numFields = -1;
         int newestVersion = specificVersion ? version : 0;
-        char fields[110];
+        unsigned char fields[110];
         RID rid;
 
         while (scanner.getNextTuple(rid, data) != RM_EOF) {
@@ -532,14 +569,14 @@ namespace PeterDB {
             if (specificVersion) {
                 if (version == newestVersion) {
                     memmove(&numFields, data + (1 + INT_BYTES), INT_BYTES);
-                    strncpy(fields, data + (1 + INT_BYTES + INT_BYTES), numFields);
+                    memmove(fields, data + (1 + INT_BYTES + INT_BYTES), numFields);
                     break;
                 }
             } else {
                 if (version > newestVersion) {
                     newestVersion = version;
                     memmove(&numFields, data + (1 + INT_BYTES), INT_BYTES);
-                    strncpy(fields, data + (1 + INT_BYTES + INT_BYTES), numFields);
+                    memmove(fields, data + (1 + INT_BYTES + INT_BYTES), numFields);
                 }
             }
         }
@@ -579,10 +616,11 @@ namespace PeterDB {
 
         if (rbfm.openFile("Schemas", fh) == -1) return -1;
         currVersionPositions.erase(currVersionPositions.find(currVersionAttrs[attributeName]));
-        char newPositions[currVersionPositions.size()];
+        char newPositions[currVersionPositions.size() + 1];
         int i = 0;
         for (int newPos : currVersionPositions)
             newPositions[i++] = static_cast<char>(newPos);
+        newPositions[i] = '\0';
         char data[150];
         memset(data, 0, 1);
         if (addSchemasEntry(fh, tableID, currVersion + 1, currVersionPositions.size(), newPositions, data) == -1) {rbfm.closeFile(fh); return -1;}
@@ -607,10 +645,11 @@ namespace PeterDB {
         if (rbfm.closeFile(fh) == -1) return -1;
 
         if (rbfm.openFile("Schemas", fh) == -1) return -1;
-        char newPositions[currVersionPositions.size()];
+        char newPositions[currVersionPositions.size() + 1];
         int i = 0;
         for (int newPos : currVersionPositions)
             newPositions[i++] = static_cast<char>(newPos);
+        newPositions[i] = '\0';
         if (addSchemasEntry(fh, tableID, currVersion + 1, currVersionPositions.size(), newPositions, data) == -1) {rbfm.closeFile(fh); return -1;}
         return rbfm.closeFile(fh);
     }
