@@ -23,17 +23,20 @@ namespace PeterDB {
     // RM_ScanIterator is an iterator to go through tuples
     class RM_ScanIterator {
         RBFM_ScanIterator recordScanner;
+        std::string tableName;
         std::vector<Attribute> attrDescriptor;
+        std::unordered_map<std::string, int> attrPositions;
         int schemaVersion;
-        int conditionAttrPos;
+        std::string conditionAttrName;
+        CompOp comparator;
 
     public:
         RM_ScanIterator();
 
         ~RM_ScanIterator();
 
-        void init(FileHandle & fHandle, const std::vector<Attribute> &recordDescriptor, const std::string &conditionAttribute,
-                  const CompOp compOp, const void *value, const std::vector<std::string> &attributeNames, int version, int attrPos);
+        void init(const std::string &tableName, FileHandle & fHandle, const std::vector<Attribute> &recordDescriptor, const std::string &conditionAttribute,
+                  const CompOp compOp, const void *value, const std::vector<std::string> &attributeNames, int version, const std::unordered_map<std::string, int> &attrToPos);
 
         // "data" follows the same format as RelationManager::insertTuple()
         RC getNextTuple(RID &rid, void *data);
@@ -59,6 +62,7 @@ namespace PeterDB {
         std::vector<Attribute> schemasDescriptor;
         std::vector<std::string> columnsColumns;
         int nextTableID;
+        friend class RM_ScanIterator;
 
     public:
         static RelationManager &instance();
@@ -129,7 +133,7 @@ namespace PeterDB {
         RC getTableID(const std::string &tableName, int &tableID, bool deleteEntry, int *isSystemTable);
         void formatString(const std::string &str, char *value);
         RC getSchemaVersionInfo(const std::string &tableName, int &tableID, int &version, int &pos, std::unordered_map<std::string, int> &names, std::unordered_set<int> &positions);
-        void RelationManager::convertDataToCurrSchema(void *data, const std::vector<Attribute> &currDescriptor, const std::vector<Attribute> &recordDescriptor,
+        void convertDataToCurrSchema(void *data, const std::vector<Attribute> &currDescriptor, const std::vector<Attribute> &recordDescriptor,
                                                       std::unordered_map<std::string, int> &currAttrPos, std::unordered_map<std::string, int> &recoVersionAttrPos);
     };
 
