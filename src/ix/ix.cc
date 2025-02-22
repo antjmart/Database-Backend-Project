@@ -2,7 +2,7 @@
 
 namespace PeterDB {
     IndexManager &IndexManager::instance() {
-        static IndexManager _index_manager = IndexManager();
+        static IndexManager _index_manager;
         return _index_manager;
     }
 
@@ -59,18 +59,8 @@ namespace PeterDB {
         return -1;
     }
 
-    IXFileHandle::IXFileHandle() {
-        ixReadPageCounter = 0;
-        ixWritePageCounter = 0;
-        ixAppendPageCounter = 0;
-    }
+    IXFileHandle::IXFileHandle() : FileHandle() {}
 
-    IXFileHandle::~IXFileHandle() {
-    }
-
-    RC
-    IXFileHandle::collectCounterValues(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount) {
-        return -1;
-    }
+    IXFileHandle::~IXFileHandle() = default;
 
 } // namespace PeterDB
