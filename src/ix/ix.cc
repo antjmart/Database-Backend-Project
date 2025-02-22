@@ -7,19 +7,19 @@ namespace PeterDB {
     }
 
     RC IndexManager::createFile(const std::string &fileName) {
-        return -1;
+        return PagedFileManager::instance().createFile(fileName);
     }
 
     RC IndexManager::destroyFile(const std::string &fileName) {
-        return -1;
+        return PagedFileManager::instance().destroyFile(fileName);
     }
 
     RC IndexManager::openFile(const std::string &fileName, IXFileHandle &ixFileHandle) {
-        return -1;
+        return PagedFileManager::instance().openFile(fileName, ixFileHandle);
     }
 
     RC IndexManager::closeFile(IXFileHandle &ixFileHandle) {
-        return -1;
+        return PagedFileManager::instance().closeFile(ixFileHandle);
     }
 
     RC
