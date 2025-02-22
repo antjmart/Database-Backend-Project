@@ -73,23 +73,14 @@ namespace PeterDB {
         RC close();
     };
 
-    class IXFileHandle {
+    class IXFileHandle : public FileHandle {
     public:
-
-        // variables to keep counter for each operation
-        unsigned ixReadPageCounter;
-        unsigned ixWritePageCounter;
-        unsigned ixAppendPageCounter;
-
         // Constructor
         IXFileHandle();
 
         // Destructor
         ~IXFileHandle();
-
-        // Put the current counter values of associated PF FileHandles into variables
-        RC collectCounterValues(unsigned &readPageCount, unsigned &writePageCount, unsigned &appendPageCount);
-
     };
+
 }// namespace PeterDB
 #endif // _ix_h_
