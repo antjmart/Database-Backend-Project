@@ -82,6 +82,8 @@ namespace PeterDB {
         IndexManager(const IndexManager &) = default;                               // Prevent construction by copying
         IndexManager &operator=(const IndexManager &) = default;                    // Prevent assignment
 
+        int maxNodeSlots(const Attribute & attr);
+        int nodeEntrySize(const Attribute & attr, bool isLeafPage);
     };
 
     class IX_ScanIterator {
