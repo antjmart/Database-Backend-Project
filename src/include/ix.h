@@ -84,6 +84,9 @@ namespace PeterDB {
 
         int maxNodeSlots(const Attribute & attr);
         int nodeEntrySize(const Attribute & attr, bool isLeafPage);
+        RC insertEntryIntoEmptyIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
+        RC insertEntryIntoOnlyRootIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
+        RC insertEntryIntoIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
     };
 
     class IX_ScanIterator {
