@@ -1,6 +1,43 @@
 #include "src/include/ix.h"
 
 namespace PeterDB {
+    bool IntKey::operator < (const IntKey & other) const {
+        return key < other.key || (key == other.key && rid < other.rid);
+    }
+
+    bool FloatKey::operator < (const FloatKey & other) const {
+        return key < other.key || (key == other.key && rid < other.rid);
+    }
+
+    bool StringKey::operator < (const StringKey & other) const {
+        return key < other.key || (key == other.key && rid < other.rid);
+    }
+
+    bool IntKey::operator == (const IntKey & other) const {
+        return key == other.key && rid == other.rid;
+    }
+
+    bool FloatKey::operator == (const FloatKey & other) const {
+        return key == other.key && rid == other.rid;
+    }
+
+    bool StringKey::operator == (const StringKey & other) const {
+        return key == other.key && rid == other.rid;
+    }
+
+    bool IntKey::operator <= (const IntKey & other) const {
+        return key < other.key || (key == other.key && rid <= other.rid);
+    }
+
+    bool FloatKey::operator <= (const FloatKey & other) const {
+        return key < other.key || (key == other.key && rid <= other.rid);
+    }
+
+    bool StringKey::operator <= (const StringKey & other) const {
+        return key < other.key || (key == other.key && rid <= other.rid);
+    }
+
+
     IndexManager &IndexManager::instance() {
         static IndexManager _index_manager;
         return _index_manager;
