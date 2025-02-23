@@ -88,13 +88,33 @@ namespace PeterDB {
         return (PAGE_SIZE - PARENT_BYTES_BEFORE_KEYS) / nodeEntrySize(attr, false);
     }
 
-    RC
-    IndexManager::insertEntry(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
+    RC IndexManager::insertEntryIntoEmptyIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
+        return -1;
+    }
+
+    RC IndexManager::insertEntryIntoOnlyRootIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
+        return -1;
+    }
+
+    RC IndexManager::insertEntryIntoIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
         return -1;
     }
 
     RC
+    IndexManager::insertEntry(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
+        if (ixFileHandle.indexMaxPageNodes == -1) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
+
+        if (ixFileHandle.pageCount == 0)
+            return insertEntryIntoEmptyIndex(ixFileHandle, attribute, key, rid);
+        else if (ixFileHandle.pageCount == 1)
+            return insertEntryIntoOnlyRootIndex(ixFileHandle, attribute, key, rid);
+        else
+            return insertEntryIntoIndex(ixFileHandle, attribute, key, rid);
+    }
+
+    RC
     IndexManager::deleteEntry(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
+        if (ixFileHandle.indexMaxPageNodes == -1) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
         return -1;
     }
 
