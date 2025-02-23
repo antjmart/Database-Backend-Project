@@ -1,5 +1,17 @@
 #include "src/include/ix.h"
 
+constexpr int SLOT_COUNT_BYTES = sizeof(unsigned short);
+constexpr int PAGE_POINTER_BYTES = sizeof(unsigned);
+constexpr int PAGE_NUM_BYTES = sizeof(unsigned);
+constexpr int SLOT_BYTES = sizeof(unsigned short);
+constexpr int RID_BYTES = PAGE_NUM_BYTES + SLOT_BYTES;
+constexpr int LEAF_CHECK_BYTE = 1;
+constexpr int LEAF_BYTES_BEFORE_KEYS = LEAF_CHECK_BYTE + 2 * PAGE_POINTER_BYTES + SLOT_COUNT_BYTES;
+constexpr int PARENT_BYTES_BEFORE_KEYS = LEAF_CHECK_BYTE + PAGE_POINTER_BYTES + SLOT_COUNT_BYTES + PAGE_POINTER_BYTES;
+constexpr int ROOT_BYTES_BEFORE_KEYS = SLOT_COUNT_BYTES + PAGE_POINTER_BYTES;
+constexpr int INT_BYTES = sizeof(int);
+
+
 namespace PeterDB {
     bool IntKey::operator < (const IntKey & other) const {
         return key < other.key || (key == other.key && rid < other.rid);
@@ -57,6 +69,18 @@ namespace PeterDB {
 
     RC IndexManager::closeFile(IXFileHandle &ixFileHandle) {
         return PagedFileManager::instance().closeFile(ixFileHandle);
+    }
+
+    int IndexManager::nodeEntrySize(const Attribute & attr, bool isLeafPage) {
+        int entrySize = attr.length + RID_BYTES;
+        if (attr.type == TypeVarChar) entrySize += INT_BYTES;
+        if (!isLeafPage) entrySize += PAGE_POINTER_BYTES;
+        return entrySize;
+    }
+
+    int IndexManager::maxNodeSlots(const Attribute & attr) {
+        // max index entries on a node determined by parent node layout
+        return (PAGE_SIZE - PARENT_BYTES_BEFORE_KEYS) / nodeEntrySize(attr, false);
     }
 
     RC
