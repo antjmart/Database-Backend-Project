@@ -9,10 +9,22 @@ namespace PeterDB {
     using SizeType = unsigned short;
 
     // Record ID
-    typedef struct {
+    struct RID {
         unsigned pageNum;           // page number
         unsigned short slotNum;     // slot number in the page
-    } RID;
+
+        bool operator < (const RID & other) const {
+            return pageNum < other.pageNum || (pageNum == other.pageNum && slotNum < other.slotNum);
+        }
+
+        bool operator == (const RID & other) const {
+            return pageNum == other.pageNum && slotNum == other.slotNum;
+        }
+
+        bool operator <= (const RID & other) const {
+            return pageNum < other.pageNum || (pageNum == other.pageNum && slotNum <= other.slotNum);
+        }
+    };
 
     // Attribute
     typedef enum {
