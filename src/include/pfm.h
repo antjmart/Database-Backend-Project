@@ -42,10 +42,10 @@ namespace PeterDB {
         unsigned pageCount;
 
         FileHandle();                                                       // Default constructor
-        ~FileHandle();                                                      // Destructor
+        virtual ~FileHandle();                                              // Destructor
         FileHandle & operator = (const FileHandle & other);                 // Assigns counters, not open file
 
-        RC initFileHandle(const std::string &fileName);                     // Pull info from file's first page
+        virtual RC initFileHandle(const std::string &fileName);             // Pull info from file's first page
         RC readPage(PageNum pageNum, void *data);                           // Get a specific page
         RC writePage(PageNum pageNum, const void *data);                    // Write a specific page
         RC appendPage(const void *data);                                    // Append a specific page
