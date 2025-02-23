@@ -14,6 +14,33 @@ namespace PeterDB {
 
     class IXFileHandle;
 
+    struct IntKey {
+        int key;
+        RID rid;
+
+        bool operator < (const IntKey & other) const;
+        bool operator == (const IntKey & other) const;
+        bool operator <= (const IntKey & other) const;
+    };
+
+    struct FloatKey {
+        float key;
+        RID rid;
+
+        bool operator < (const FloatKey & other) const;
+        bool operator == (const FloatKey & other) const;
+        bool operator <= (const FloatKey & other) const;
+    };
+
+    struct StringKey {
+        std::string key;
+        RID rid;
+
+        bool operator < (const StringKey & other) const;
+        bool operator == (const StringKey & other) const;
+        bool operator <= (const StringKey & other) const;
+    };
+
     class IndexManager {
 
     public:
