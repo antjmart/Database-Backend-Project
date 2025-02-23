@@ -49,6 +49,11 @@ namespace PeterDB {
         return key < other.key || (key == other.key && rid <= other.rid);
     }
 
+    RC IXFileHandle::initFileHandle(const std::string &fileName) {
+        if (FileHandle::initFileHandle(fileName) == -1) return -1;
+        indexMaxPageNodes = -1;
+        return 0;
+    }
 
     IndexManager &IndexManager::instance() {
         static IndexManager _index_manager;
@@ -120,7 +125,7 @@ namespace PeterDB {
         return -1;
     }
 
-    IXFileHandle::IXFileHandle() : FileHandle() {}
+    IXFileHandle::IXFileHandle() : FileHandle(), indexMaxPageNodes(-1) {}
 
     IXFileHandle::~IXFileHandle() = default;
 

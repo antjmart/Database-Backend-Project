@@ -104,11 +104,15 @@ namespace PeterDB {
 
     class IXFileHandle : public FileHandle {
     public:
+        int indexMaxPageNodes;
+
         // Constructor
         IXFileHandle();
 
         // Destructor
         ~IXFileHandle();
+
+        RC initFileHandle(const std::string &fileName);
     };
 
 }// namespace PeterDB
