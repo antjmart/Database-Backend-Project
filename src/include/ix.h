@@ -82,14 +82,15 @@ namespace PeterDB {
         IndexManager(const IndexManager &) = default;                               // Prevent construction by copying
         IndexManager &operator=(const IndexManager &) = default;                    // Prevent assignment
 
-        int maxNodeSlots(const Attribute & attr);
-        int nodeEntrySize(const Attribute & attr, bool isLeafPage);
+        SizeType maxNodeSlots(const Attribute & attr);
+        SizeType nodeEntrySize(const Attribute & attr, bool isLeafPage);
         RC insertEntryIntoEmptyIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
         RC insertEntryIntoOnlyRootIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
         RC insertEntryIntoIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
         void putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage = 0);
-        unsigned short determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, bool isLeafPage, unsigned short slotCount);
-        void shiftEntriesRight(char *pagePtr, unsigned short entriesToShift, int entrySize);
+        SizeType determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, bool isLeafPage, SizeType slotCount);
+        void shiftEntriesRight(char *pagePtr, SizeType entriesToShift, SizeType entrySize);
+        RC splitRootLeaf(IXFileHandle &fh, char *rootPage, const Attribute &attr, const void *key, const RID &rid, SizeType entrySize);
     };
 
     class IX_ScanIterator {
@@ -110,7 +111,7 @@ namespace PeterDB {
 
     class IXFileHandle : public FileHandle {
     public:
-        int indexMaxPageNodes;
+        SizeType indexMaxPageNodes;
 
         // Constructor
         IXFileHandle();
