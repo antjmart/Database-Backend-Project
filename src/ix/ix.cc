@@ -14,42 +14,6 @@ constexpr unsigned short INT_BYTES = sizeof(int);
 
 
 namespace PeterDB {
-    bool IntKey::operator < (const IntKey & other) const {
-        return key < other.key || (key == other.key && rid < other.rid);
-    }
-
-    bool FloatKey::operator < (const FloatKey & other) const {
-        return key < other.key || (key == other.key && rid < other.rid);
-    }
-
-    bool StringKey::operator < (const StringKey & other) const {
-        return key < other.key || (key == other.key && rid < other.rid);
-    }
-
-    bool IntKey::operator == (const IntKey & other) const {
-        return key == other.key && rid == other.rid;
-    }
-
-    bool FloatKey::operator == (const FloatKey & other) const {
-        return key == other.key && rid == other.rid;
-    }
-
-    bool StringKey::operator == (const StringKey & other) const {
-        return key == other.key && rid == other.rid;
-    }
-
-    bool IntKey::operator <= (const IntKey & other) const {
-        return key < other.key || (key == other.key && rid <= other.rid);
-    }
-
-    bool FloatKey::operator <= (const FloatKey & other) const {
-        return key < other.key || (key == other.key && rid <= other.rid);
-    }
-
-    bool StringKey::operator <= (const StringKey & other) const {
-        return key < other.key || (key == other.key && rid <= other.rid);
-    }
-
     RC IXFileHandle::initFileHandle(const std::string &fileName) {
         if (FileHandle::initFileHandle(fileName) == -1) return -1;
         indexMaxPageNodes = 0;
@@ -96,21 +60,21 @@ namespace PeterDB {
         SizeType slot = 1;
 
         if (attr.type == TypeInt) {
-            IntKey iKey{*static_cast<const int *>(key), rid};
+            Key<int> iKey{*static_cast<const int *>(key), rid};
 
             for (; slot <= slotCount; ++slot) {
                 slotLoc = pagePtr + (slot - 1) * entrySize;
                 RID entryRID{*reinterpret_cast<unsigned *>(slotLoc + attr.length), *reinterpret_cast<unsigned short *>(slotLoc + attr.length + PAGE_NUM_BYTES)};
-                IntKey slotKey{*reinterpret_cast<int *>(slotLoc), entryRID};
+                Key<int> slotKey{*reinterpret_cast<int *>(slotLoc), entryRID};
                 if (iKey < slotKey) break;
             }
         } else if (attr.type == TypeReal) {
-            FloatKey fKey{*static_cast<const float *>(key), rid};
+            Key<float> fKey{*static_cast<const float *>(key), rid};
 
             for (; slot <= slotCount; ++slot) {
                 slotLoc = pagePtr + (slot - 1) * entrySize;
                 RID entryRID{*reinterpret_cast<unsigned *>(slotLoc + attr.length), *reinterpret_cast<unsigned short *>(slotLoc + attr.length + PAGE_NUM_BYTES)};
-                FloatKey slotKey{*reinterpret_cast<float *>(slotLoc), entryRID};
+                Key<float> slotKey{*reinterpret_cast<float *>(slotLoc), entryRID};
                 if (fKey < slotKey) break;
             }
         } else {
@@ -119,7 +83,7 @@ namespace PeterDB {
             char str[attr.length + 1];
             memmove(str, static_cast<const char *>(key) + INT_BYTES, strLen);
             str[strLen] = '\0';
-            StringKey strKey{str, rid};
+            Key<std::string> strKey{str, rid};
 
             for (; slot <= slotCount; ++slot) {
                 slotLoc = pagePtr + (slot - 1) * entrySize;
@@ -127,7 +91,7 @@ namespace PeterDB {
                 memmove(str, slotLoc + INT_BYTES, strLen);
                 str[strLen] = '\0';
                 RID entryRID{*reinterpret_cast<unsigned *>(slotLoc + (INT_BYTES + strLen)), *reinterpret_cast<unsigned short *>(slotLoc + (INT_BYTES + strLen + PAGE_NUM_BYTES))};
-                StringKey slotKey{str, entryRID};
+                Key<std::string> slotKey{str, entryRID};
 
                 if (strKey < slotKey) break;
             }

@@ -14,31 +14,26 @@ namespace PeterDB {
 
     class IXFileHandle;
 
-    struct IntKey {
-        int key;
+    template <typename T>
+    class Key {
+        T val;
         RID rid;
 
-        bool operator < (const IntKey & other) const;
-        bool operator == (const IntKey & other) const;
-        bool operator <= (const IntKey & other) const;
-    };
+    public:
+        Key(const T &value, const RID &recoID)
+            : val(value), rid(recoID) {}
 
-    struct FloatKey {
-        float key;
-        RID rid;
+        bool operator < (const Key<T> & other) const {
+            return val < other.val || (val == other.val && rid < other.rid);
+        }
 
-        bool operator < (const FloatKey & other) const;
-        bool operator == (const FloatKey & other) const;
-        bool operator <= (const FloatKey & other) const;
-    };
+        bool operator == (const Key<T> & other) const {
+            return val == other.val && rid == other.rid;
+        }
 
-    struct StringKey {
-        std::string key;
-        RID rid;
-
-        bool operator < (const StringKey & other) const;
-        bool operator == (const StringKey & other) const;
-        bool operator <= (const StringKey & other) const;
+        bool operator <= (const Key<T> & other) const {
+            return val < other.val || (val == other.val && rid <= other.rid);
+        }
     };
 
     class IndexManager {
