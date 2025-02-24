@@ -87,6 +87,9 @@ namespace PeterDB {
         RC insertEntryIntoEmptyIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
         RC insertEntryIntoOnlyRootIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
         RC insertEntryIntoIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
+        void putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage = 0);
+        unsigned short determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, bool isLeafPage, unsigned short slotCount);
+        void shiftEntriesRight(char *pagePtr, unsigned short entriesToShift, int entrySize);
     };
 
     class IX_ScanIterator {
