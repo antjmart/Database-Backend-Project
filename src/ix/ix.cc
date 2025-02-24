@@ -1,16 +1,16 @@
 #include "src/include/ix.h"
 #include <cstring>
 
-constexpr int SLOT_COUNT_BYTES = sizeof(unsigned short);
-constexpr int PAGE_POINTER_BYTES = sizeof(unsigned);
-constexpr int PAGE_NUM_BYTES = sizeof(unsigned);
-constexpr int SLOT_BYTES = sizeof(unsigned short);
-constexpr int RID_BYTES = PAGE_NUM_BYTES + SLOT_BYTES;
-constexpr int LEAF_CHECK_BYTE = 1;
-constexpr int LEAF_BYTES_BEFORE_KEYS = LEAF_CHECK_BYTE + 2 * PAGE_POINTER_BYTES + SLOT_COUNT_BYTES;
-constexpr int PARENT_BYTES_BEFORE_KEYS = LEAF_CHECK_BYTE + PAGE_POINTER_BYTES + SLOT_COUNT_BYTES + PAGE_POINTER_BYTES;
-constexpr int ROOT_BYTES_BEFORE_KEYS = SLOT_COUNT_BYTES + PAGE_POINTER_BYTES;
-constexpr int INT_BYTES = sizeof(int);
+constexpr unsigned short SLOT_COUNT_BYTES = sizeof(PeterDB::SizeType);
+constexpr unsigned short PAGE_POINTER_BYTES = sizeof(unsigned);
+constexpr unsigned short PAGE_NUM_BYTES = sizeof(unsigned);
+constexpr unsigned short SLOT_BYTES = sizeof(unsigned short);
+constexpr unsigned short RID_BYTES = PAGE_NUM_BYTES + SLOT_BYTES;
+constexpr unsigned short LEAF_CHECK_BYTE = 1;
+constexpr unsigned short LEAF_BYTES_BEFORE_KEYS = LEAF_CHECK_BYTE + 2 * PAGE_POINTER_BYTES + SLOT_COUNT_BYTES;
+constexpr unsigned short PARENT_BYTES_BEFORE_KEYS = LEAF_CHECK_BYTE + PAGE_POINTER_BYTES + SLOT_COUNT_BYTES + PAGE_POINTER_BYTES;
+constexpr unsigned short ROOT_BYTES_BEFORE_KEYS = SLOT_COUNT_BYTES + PAGE_POINTER_BYTES;
+constexpr unsigned short INT_BYTES = sizeof(int);
 
 
 namespace PeterDB {
@@ -52,7 +52,7 @@ namespace PeterDB {
 
     RC IXFileHandle::initFileHandle(const std::string &fileName) {
         if (FileHandle::initFileHandle(fileName) == -1) return -1;
-        indexMaxPageNodes = -1;
+        indexMaxPageNodes = 0;
         return 0;
     }
 
@@ -77,23 +77,23 @@ namespace PeterDB {
         return PagedFileManager::instance().closeFile(ixFileHandle);
     }
 
-    int IndexManager::nodeEntrySize(const Attribute & attr, bool isLeafPage) {
-        int entrySize = attr.length + RID_BYTES;
+    SizeType IndexManager::nodeEntrySize(const Attribute & attr, bool isLeafPage) {
+        SizeType entrySize = attr.length + RID_BYTES;
         if (attr.type == TypeVarChar) entrySize += INT_BYTES;
         if (!isLeafPage) entrySize += PAGE_POINTER_BYTES;
         return entrySize;
     }
 
-    int IndexManager::maxNodeSlots(const Attribute & attr) {
+    SizeType IndexManager::maxNodeSlots(const Attribute & attr) {
         // max index entries on a node determined by parent node layout
         return (PAGE_SIZE - PARENT_BYTES_BEFORE_KEYS) / nodeEntrySize(attr, false);
     }
 
-    unsigned short IndexManager::determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, bool isLeafPage, unsigned short slotCount) {
-        int entrySize = attr.length + RID_BYTES;
+    SizeType IndexManager::determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, bool isLeafPage, SizeType slotCount) {
+        SizeType entrySize = attr.length + RID_BYTES;
         if (!isLeafPage) entrySize += PAGE_POINTER_BYTES;
         char *slotLoc;
-        unsigned short slot = 1;
+        SizeType slot = 1;
 
         if (attr.type == TypeInt) {
             IntKey iKey{*static_cast<const int *>(key), rid};
@@ -136,14 +136,13 @@ namespace PeterDB {
         return slot;
     }
 
-    void IndexManager::shiftEntriesRight(char *pagePtr, unsigned short entriesToShift, int entrySize) {
+    void IndexManager::shiftEntriesRight(char *pagePtr, SizeType entriesToShift, SizeType entrySize) {
         memmove(pagePtr + entrySize, pagePtr, entriesToShift * entrySize);
     }
 
     void IndexManager::putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage) {
         if (attr.type == TypeVarChar) {
-            int varCharLen;
-            memmove(&varCharLen, key, INT_BYTES);
+            int varCharLen = *static_cast<const int *>(key);
             memmove(pagePtr, key, varCharLen + INT_BYTES);
             pagePtr += varCharLen + INT_BYTES;
         } else {
@@ -164,31 +163,86 @@ namespace PeterDB {
     RC IndexManager::insertEntryIntoEmptyIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
         char rootPage[PAGE_SIZE];
         memset(rootPage, 0, PAGE_SIZE);
-        unsigned short slotCount = 1;
+        SizeType slotCount = 1;
         memmove(rootPage, &slotCount, SLOT_COUNT_BYTES);
 
         putEntryOnPage(rootPage + SLOT_COUNT_BYTES, attribute, key, rid);
         return ixFileHandle.appendPage(rootPage);
     }
 
+    RC IndexManager::splitRootLeaf(IXFileHandle &fh, char *rootPage, const Attribute &attr, const void *key, const RID &rid, SizeType entrySize, SizeType slot) {
+        char leftPage[PAGE_SIZE];
+        char rightPage[PAGE_SIZE];
+        memset(leftPage, 0, PAGE_SIZE);
+        memset(rightPage, 0, PAGE_SIZE);
+        memset(leftPage, 1, LEAF_CHECK_BYTE);
+        memset(rightPage, 1, LEAF_CHECK_BYTE);
+        unsigned rightPageNum = 2;
+        memmove(leftPage + (LEAF_CHECK_BYTE + PAGE_POINTER_BYTES), &rightPageNum, PAGE_POINTER_BYTES);
+        char *leftPtr = leftPage + LEAF_BYTES_BEFORE_KEYS;
+        char *rightPtr = rightPage + LEAF_BYTES_BEFORE_KEYS;
+
+        SizeType leftSlotCount = (fh.indexMaxPageNodes + 1) / 2;
+        SizeType rightSlotCount = fh.indexMaxPageNodes + 1 - leftSlotCount;
+        memmove(leftPtr - SLOT_COUNT_BYTES, &leftSlotCount, SLOT_COUNT_BYTES);
+        memmove(rightPtr - SLOT_COUNT_BYTES, &rightSlotCount, SLOT_COUNT_BYTES);
+        char *rootPagePtr;
+
+        for (SizeType entry = 1, entriesMoved = 0; entry <= fh.indexMaxPageNodes; ++entry) {
+            rootPagePtr = rootPage + (SLOT_COUNT_BYTES + (entry - 1) * entrySize);
+            if (slot == entry) {
+                if (entriesMoved++ < leftSlotCount) {
+                    putEntryOnPage(leftPtr, attr, key, rid);
+                    leftPtr += entrySize;
+                } else {
+                    putEntryOnPage(rightPtr, attr, key, rid);
+                    rightPtr += entrySize;
+                }
+            }
+
+            if (entriesMoved++ < leftSlotCount) {
+                memmove(leftPtr, rootPagePtr, entrySize);
+                leftPtr += entrySize;
+            } else {
+                memmove(rightPtr, rootPagePtr, entrySize);
+                rightPtr += entrySize;
+            }
+        }
+
+        if (slot == fh.indexMaxPageNodes + 1)
+            putEntryOnPage(rightPtr, attr, key, rid);
+        reinterpret_cast<SizeType *>(rootPage)[0] = 1;
+        reinterpret_cast<unsigned *>(rootPage + SLOT_COUNT_BYTES)[0] = 1;
+        rightPtr = rightPage + LEAF_BYTES_BEFORE_KEYS;
+        if (attr.type == TypeVarChar)
+            rightPtr += INT_BYTES + *reinterpret_cast<int *>(rightPtr);
+        else
+            rightPtr += attr.length;
+        RID entryRID{*reinterpret_cast<unsigned *>(rightPtr), *reinterpret_cast<unsigned short *>(rightPtr + PAGE_NUM_BYTES)};
+        putEntryOnPage(rootPage + ROOT_BYTES_BEFORE_KEYS, attr, rightPage + LEAF_BYTES_BEFORE_KEYS, entryRID, 2);
+
+        if (fh.writePage(0, rootPage) == -1) return -1;
+        if (fh.appendPage(leftPage) == -1) return -1;
+        return fh.appendPage(rightPage);
+    }
+
     RC IndexManager::insertEntryIntoOnlyRootIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
         char rootPage[PAGE_SIZE];
         if (ixFileHandle.readPage(0, rootPage) == -1) return -1;
-        unsigned short slotCount;
+        SizeType slotCount;
         memmove(&slotCount, rootPage, SLOT_COUNT_BYTES);
-        int entrySize = nodeEntrySize(attribute, true);
+        SizeType entrySize = nodeEntrySize(attribute, true);
+        SizeType slot = determineSlot(rootPage + SLOT_COUNT_BYTES, attribute, key, rid, true, slotCount);
 
-        if (slotCount < ixFileHandle.indexMaxPageNodes) {
-            unsigned short slot = determineSlot(rootPage + SLOT_COUNT_BYTES, attribute, key, rid, true, slotCount);
-            char *location = rootPage + (SLOT_COUNT_BYTES + (slot - 1) * entrySize);
-            if (slot <= slotCount) shiftEntriesRight(location, slotCount - slot + 1, entrySize);
-            putEntryOnPage(location, attribute, key, rid);
-            ++slotCount;
-            memmove(rootPage, &slotCount, SLOT_COUNT_BYTES);
-            return ixFileHandle.writePage(0, rootPage);
-        } else {
-            return -1;
-        }
+        if (slotCount >= ixFileHandle.indexMaxPageNodes)
+            return splitRootLeaf(ixFileHandle, rootPage, attribute, key, rid, entrySize, slot);
+
+        char *location = rootPage + (SLOT_COUNT_BYTES + (slot - 1) * entrySize);
+        if (slot <= slotCount) shiftEntriesRight(location, slotCount - slot + 1, entrySize);
+        putEntryOnPage(location, attribute, key, rid);
+        ++slotCount;
+        memmove(rootPage, &slotCount, SLOT_COUNT_BYTES);
+        return ixFileHandle.writePage(0, rootPage);
     }
 
     RC IndexManager::insertEntryIntoIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
@@ -197,7 +251,7 @@ namespace PeterDB {
 
     RC
     IndexManager::insertEntry(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
-        if (ixFileHandle.indexMaxPageNodes == -1) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
+        if (ixFileHandle.indexMaxPageNodes == 0) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
 
         if (ixFileHandle.pageCount == 0)
             return insertEntryIntoEmptyIndex(ixFileHandle, attribute, key, rid);
@@ -209,7 +263,7 @@ namespace PeterDB {
 
     RC
     IndexManager::deleteEntry(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
-        if (ixFileHandle.indexMaxPageNodes == -1) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
+        if (ixFileHandle.indexMaxPageNodes == 0) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
         return -1;
     }
 
@@ -241,7 +295,7 @@ namespace PeterDB {
         return -1;
     }
 
-    IXFileHandle::IXFileHandle() : FileHandle(), indexMaxPageNodes(-1) {}
+    IXFileHandle::IXFileHandle() : FileHandle(), indexMaxPageNodes(0) {}
 
     IXFileHandle::~IXFileHandle() = default;
 
