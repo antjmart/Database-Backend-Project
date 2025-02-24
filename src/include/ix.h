@@ -90,7 +90,7 @@ namespace PeterDB {
         void putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage = 0);
         SizeType determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, bool isLeafPage, SizeType slotCount);
         void shiftEntriesRight(char *pagePtr, SizeType entriesToShift, SizeType entrySize);
-        RC splitRootLeaf(IXFileHandle &fh, char *rootPage, const Attribute &attr, const void *key, const RID &rid, SizeType entrySize);
+        RC splitRootLeaf(IXFileHandle &fh, char *rootPage, const Attribute &attr, const void *key, const RID &rid, SizeType entrySize, SizeType slot);
     };
 
     class IX_ScanIterator {
