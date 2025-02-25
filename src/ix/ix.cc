@@ -53,29 +53,43 @@ namespace PeterDB {
         return (PAGE_SIZE - PARENT_BYTES_BEFORE_KEYS) / nodeEntrySize(attr, false);
     }
 
-    SizeType IndexManager::determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, bool isLeafPage, SizeType slotCount) {
+    SizeType IndexManager::determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, bool isLeafPage, SizeType slotCount, int typeOfSearch) {
         SizeType entrySize = attr.length + RID_BYTES;
         if (!isLeafPage) entrySize += PAGE_POINTER_BYTES;
         char *slotLoc;
-        SizeType slot = 1;
+        SizeType low = 1, high = slotCount, mid = 1;
 
         if (attr.type == TypeInt) {
             Key<int> iKey{*static_cast<const int *>(key), rid};
 
-            for (; slot <= slotCount; ++slot) {
-                slotLoc = pagePtr + (slot - 1) * entrySize;
+            while (low <= high) {
+                mid = (low + high) / 2;
+                slotLoc = pagePtr + (mid - 1) * entrySize;
                 RID entryRID{*reinterpret_cast<unsigned *>(slotLoc + attr.length), *reinterpret_cast<unsigned short *>(slotLoc + attr.length + PAGE_NUM_BYTES)};
                 Key<int> slotKey{*reinterpret_cast<int *>(slotLoc), entryRID};
-                if (iKey < slotKey) break;
+
+                if (iKey < slotKey)
+                    high = typeOfSearch == 3 ? --mid : mid - 1;
+                else if (iKey == slotKey)
+                    return mid;
+                else
+                    low = typeOfSearch == 2 ? ++mid : mid + 1;
             }
         } else if (attr.type == TypeReal) {
             Key<float> fKey{*static_cast<const float *>(key), rid};
 
-            for (; slot <= slotCount; ++slot) {
-                slotLoc = pagePtr + (slot - 1) * entrySize;
+            while (low <= high) {
+                mid = (low + high) / 2;
+                slotLoc = pagePtr + (mid - 1) * entrySize;
                 RID entryRID{*reinterpret_cast<unsigned *>(slotLoc + attr.length), *reinterpret_cast<unsigned short *>(slotLoc + attr.length + PAGE_NUM_BYTES)};
                 Key<float> slotKey{*reinterpret_cast<float *>(slotLoc), entryRID};
-                if (fKey < slotKey) break;
+
+                if (fKey < slotKey)
+                    high = typeOfSearch == 3 ? --mid : mid - 1;
+                else if (fKey == slotKey)
+                    return mid;
+                else
+                    low = typeOfSearch == 2 ? ++mid : mid + 1;
             }
         } else {
             entrySize += INT_BYTES;
@@ -85,19 +99,25 @@ namespace PeterDB {
             str[strLen] = '\0';
             Key<std::string> strKey{str, rid};
 
-            for (; slot <= slotCount; ++slot) {
-                slotLoc = pagePtr + (slot - 1) * entrySize;
+            while (low <= high) {
+                mid = (low + high) / 2;
+                slotLoc = pagePtr + (mid - 1) * entrySize;
                 strLen = *reinterpret_cast<int *>(slotLoc);
                 memmove(str, slotLoc + INT_BYTES, strLen);
                 str[strLen] = '\0';
                 RID entryRID{*reinterpret_cast<unsigned *>(slotLoc + (INT_BYTES + strLen)), *reinterpret_cast<unsigned short *>(slotLoc + (INT_BYTES + strLen + PAGE_NUM_BYTES))};
                 Key<std::string> slotKey{str, entryRID};
 
-                if (strKey < slotKey) break;
+                if (strKey < slotKey)
+                    high = typeOfSearch == 3 ? --mid : mid - 1;
+                else if (strKey == slotKey)
+                    return mid;
+                else
+                    low = typeOfSearch == 2 ? ++mid : mid + 1;
             }
         }
 
-        return slot;
+        return typeOfSearch == 1 ? 0 : mid;
     }
 
     void IndexManager::shiftEntriesRight(char *pagePtr, SizeType entriesToShift, SizeType entrySize) {
@@ -196,7 +216,7 @@ namespace PeterDB {
         SizeType slotCount;
         memmove(&slotCount, rootPage, SLOT_COUNT_BYTES);
         SizeType entrySize = nodeEntrySize(attribute, true);
-        SizeType slot = determineSlot(rootPage + SLOT_COUNT_BYTES, attribute, key, rid, true, slotCount);
+        SizeType slot = determineSlot(rootPage + SLOT_COUNT_BYTES, attribute, key, rid, true, slotCount, 2);
 
         if (slotCount >= ixFileHandle.indexMaxPageNodes)
             return splitRootLeaf(ixFileHandle, rootPage, attribute, key, rid, entrySize, slot);
