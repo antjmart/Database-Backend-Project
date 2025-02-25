@@ -53,9 +53,7 @@ namespace PeterDB {
         return (PAGE_SIZE - PARENT_BYTES_BEFORE_KEYS) / nodeEntrySize(attr, false);
     }
 
-    SizeType IndexManager::determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, bool isLeafPage, SizeType slotCount, int typeOfSearch) {
-        SizeType entrySize = attr.length + RID_BYTES;
-        if (!isLeafPage) entrySize += PAGE_POINTER_BYTES;
+    SizeType IndexManager::determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, SizeType entrySize, SizeType slotCount, int typeOfSearch) {
         char *slotLoc;
         SizeType low = 1, high = slotCount, mid = 1;
 
@@ -92,7 +90,6 @@ namespace PeterDB {
                     low = typeOfSearch == 2 ? ++mid : mid + 1;
             }
         } else {
-            entrySize += INT_BYTES;
             int strLen = *static_cast<const int *>(key);
             char str[attr.length + 1];
             memmove(str, static_cast<const char *>(key) + INT_BYTES, strLen);
@@ -229,7 +226,45 @@ namespace PeterDB {
         return ixFileHandle.writePage(0, rootPage);
     }
 
+    RC IndexManager::getLeafPage(IXFileHandle &fh, char *pageData, unsigned &pageNum, const Attribute &attr, const void *key, const RID &rid) {
+        SizeType entrySize = nodeEntrySize(attr, false);
+        char *keysStart;
+        SizeType slotCount, entryToFollow;
+        unsigned currPageNum = 0;
+
+        while (true) {
+            if (fh.readPage(currPageNum, pageData) == -1) return -1;
+            if (currPageNum == 0) {
+                keysStart = pageData + ROOT_BYTES_BEFORE_KEYS;
+                slotCount = *reinterpret_cast<SizeType *>(pageData);
+            } else {
+                if (*reinterpret_cast<unsigned char *>(pageData) == 1) break;
+                keysStart = pageData + PARENT_BYTES_BEFORE_KEYS;
+                memmove(&slotCount, pageData + (LEAF_CHECK_BYTE + PAGE_POINTER_BYTES), SLOT_COUNT_BYTES);
+            }
+
+            entryToFollow = determineSlot(keysStart, attr, key, rid, entrySize, slotCount, 3);
+            if (entryToFollow == 0) {
+                memmove(&currPageNum, keysStart - PAGE_POINTER_BYTES, PAGE_POINTER_BYTES);
+            } else {
+                char *entryStart = keysStart + (entryToFollow - 1) * entrySize;
+                if (attr.type == TypeVarChar)
+                    memmove(&currPageNum, entryStart + (INT_BYTES + *reinterpret_cast<int *>(entryStart) + RID_BYTES), PAGE_POINTER_BYTES);
+                else
+                    memmove(&currPageNum, entryStart + (attr.length + RID_BYTES), PAGE_POINTER_BYTES);
+            }
+        }
+
+        pageNum = currPageNum;
+        return 0;
+    }
+
     RC IndexManager::insertEntryIntoIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
+        char leafPage[PAGE_SIZE];
+        unsigned leafPageNum;
+        if (getLeafPage(ixFileHandle, leafPage, leafPageNum, attribute, key, rid) == -1) return -1;
+        SizeType entrySize = nodeEntrySize(attribute, true);
+
         return -1;
     }
 
