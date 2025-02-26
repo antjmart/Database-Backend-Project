@@ -264,8 +264,17 @@ namespace PeterDB {
         unsigned leafPageNum;
         if (getLeafPage(ixFileHandle, leafPage, leafPageNum, attribute, key, rid) == -1) return -1;
         SizeType entrySize = nodeEntrySize(attribute, true);
+        SizeType slotCount = *reinterpret_cast<SizeType *>(leafPage + (LEAF_BYTES_BEFORE_KEYS - SLOT_COUNT_BYTES));
+        SizeType insertSlot = determineSlot(leafPage + LEAF_BYTES_BEFORE_KEYS, attribute, key, rid, entrySize, slotCount, 2);
 
-        return -1;
+        if (slotCount >= ixFileHandle.indexMaxPageNodes) return -1;  // will not handle splitting, for now
+
+        char *slotLoc = leafPage + (LEAF_BYTES_BEFORE_KEYS + (insertSlot - 1) * entrySize);
+        if (insertSlot <= slotCount) shiftEntriesRight(slotLoc, slotCount - insertSlot + 1, entrySize);
+        putEntryOnPage(slotLoc, attribute, key, rid);
+        ++slotCount;
+        memmove(leafPage + (LEAF_BYTES_BEFORE_KEYS - SLOT_COUNT_BYTES), &slotCount, SLOT_COUNT_BYTES);
+        return ixFileHandle.writePage(leafPageNum, leafPage);
     }
 
     RC
