@@ -145,6 +145,7 @@ namespace PeterDB {
     RC IndexManager::insertEntryIntoEmptyIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
         char rootPage[PAGE_SIZE];
         memset(rootPage, 0, PAGE_SIZE);
+        if (ixFileHandle.appendPage(rootPage) == -1) return -1;  // placing down page to act as "pointer" to root node
         SizeType slotCount = 1;
         memmove(rootPage, &slotCount, SLOT_COUNT_BYTES);
 
@@ -159,7 +160,7 @@ namespace PeterDB {
         memset(rightPage, 0, PAGE_SIZE);
         memset(leftPage, 1, LEAF_CHECK_BYTE);
         memset(rightPage, 1, LEAF_CHECK_BYTE);
-        unsigned rightPageNum = 2;
+        unsigned rightPageNum = 3;
         memmove(leftPage + (LEAF_CHECK_BYTE + PAGE_POINTER_BYTES), &rightPageNum, PAGE_POINTER_BYTES);
         char *leftPtr = leftPage + LEAF_BYTES_BEFORE_KEYS;
         char *rightPtr = rightPage + LEAF_BYTES_BEFORE_KEYS;
@@ -194,7 +195,7 @@ namespace PeterDB {
         if (slot == fh.indexMaxPageNodes + 1)
             putEntryOnPage(rightPtr, attr, key, rid);
         reinterpret_cast<SizeType *>(rootPage)[0] = 1;
-        reinterpret_cast<unsigned *>(rootPage + SLOT_COUNT_BYTES)[0] = 1;
+        reinterpret_cast<unsigned *>(rootPage + SLOT_COUNT_BYTES)[0] = 2;
         rightPtr = rightPage + LEAF_BYTES_BEFORE_KEYS;
         if (attr.type == TypeVarChar)
             rightPtr += INT_BYTES + *reinterpret_cast<int *>(rightPtr);
@@ -203,7 +204,7 @@ namespace PeterDB {
         RID entryRID{*reinterpret_cast<unsigned *>(rightPtr), *reinterpret_cast<unsigned short *>(rightPtr + PAGE_NUM_BYTES)};
         putEntryOnPage(rootPage + ROOT_BYTES_BEFORE_KEYS, attr, rightPage + LEAF_BYTES_BEFORE_KEYS, entryRID, 2);
 
-        if (fh.writePage(0, rootPage) == -1) return -1;
+        if (fh.writePage(1, rootPage) == -1) return -1;
         if (fh.appendPage(leftPage) == -1) return -1;
         return fh.appendPage(rightPage);
     }
@@ -211,6 +212,7 @@ namespace PeterDB {
     RC IndexManager::insertEntryIntoOnlyRootIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
         char rootPage[PAGE_SIZE];
         if (ixFileHandle.readPage(0, rootPage) == -1) return -1;
+        if (ixFileHandle.readPage(1, rootPage) == -1) return -1;
         SizeType slotCount;
         memmove(&slotCount, rootPage, SLOT_COUNT_BYTES);
         SizeType entrySize = nodeEntrySize(attribute, true);
@@ -224,18 +226,19 @@ namespace PeterDB {
         putEntryOnPage(location, attribute, key, rid);
         ++slotCount;
         memmove(rootPage, &slotCount, SLOT_COUNT_BYTES);
-        return ixFileHandle.writePage(0, rootPage);
+        return ixFileHandle.writePage(1, rootPage);
     }
 
     RC IndexManager::getLeafPage(IXFileHandle &fh, char *pageData, unsigned &pageNum, const Attribute &attr, const void *key, const RID &rid) {
         SizeType entrySize = nodeEntrySize(attr, false);
         char *keysStart;
         SizeType slotCount, entryToFollow;
-        unsigned currPageNum = 0;
+        unsigned currPageNum = 1;
+        if (fh.readPage(0, pageData) == -1) return -1;
 
         while (true) {
             if (fh.readPage(currPageNum, pageData) == -1) return -1;
-            if (currPageNum == 0) {
+            if (currPageNum == 1) {
                 keysStart = pageData + ROOT_BYTES_BEFORE_KEYS;
                 slotCount = *reinterpret_cast<SizeType *>(pageData);
             } else {
@@ -284,7 +287,7 @@ namespace PeterDB {
 
         switch (ixFileHandle.pageCount) {
             case 0: return insertEntryIntoEmptyIndex(ixFileHandle, attribute, key, rid);
-            case 1: return insertEntryIntoOnlyRootIndex(ixFileHandle, attribute, key, rid);
+            case 2: return insertEntryIntoOnlyRootIndex(ixFileHandle, attribute, key, rid);
             default: return insertEntryIntoIndex(ixFileHandle, attribute, key, rid);
         }
     }
@@ -296,6 +299,7 @@ namespace PeterDB {
     RC IndexManager::deleteEntryFromOnlyRootIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid) {
         char rootPage[PAGE_SIZE];
         if (fh.readPage(0, rootPage) == -1) return -1;
+        if (fh.readPage(1, rootPage) == -1) return -1;
         SizeType slotCount = *reinterpret_cast<SizeType *>(rootPage);
         if (slotCount == 0) return -1;
         SizeType entrySize = nodeEntrySize(attr, true);
@@ -307,7 +311,7 @@ namespace PeterDB {
 
         --slotCount;
         memmove(rootPage, &slotCount, SLOT_COUNT_BYTES);
-        return fh.writePage(0, rootPage);
+        return fh.writePage(1, rootPage);
     }
 
     RC IndexManager::deleteEntryFromIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid) {
@@ -333,7 +337,7 @@ namespace PeterDB {
 
         switch (ixFileHandle.pageCount) {
             case 0: return -1;
-            case 1: return deleteEntryFromOnlyRootIndex(ixFileHandle, attribute, key, rid);
+            case 2: return deleteEntryFromOnlyRootIndex(ixFileHandle, attribute, key, rid);
             default: return deleteEntryFromIndex(ixFileHandle, attribute, key, rid);
         }
     }
