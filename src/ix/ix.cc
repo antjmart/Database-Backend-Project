@@ -1,5 +1,6 @@
 #include "src/include/ix.h"
 #include <cstring>
+#include <iostream>
 
 constexpr unsigned short SLOT_COUNT_BYTES = sizeof(PeterDB::SizeType);
 constexpr unsigned short PAGE_POINTER_BYTES = sizeof(unsigned);
@@ -281,18 +282,34 @@ namespace PeterDB {
     IndexManager::insertEntry(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
         if (ixFileHandle.indexMaxPageNodes == 0) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
 
-        if (ixFileHandle.pageCount == 0)
-            return insertEntryIntoEmptyIndex(ixFileHandle, attribute, key, rid);
-        else if (ixFileHandle.pageCount == 1)
-            return insertEntryIntoOnlyRootIndex(ixFileHandle, attribute, key, rid);
-        else
-            return insertEntryIntoIndex(ixFileHandle, attribute, key, rid);
+        switch (ixFileHandle.pageCount) {
+            case 0: return insertEntryIntoEmptyIndex(ixFileHandle, attribute, key, rid);
+            case 1: return insertEntryIntoOnlyRootIndex(ixFileHandle, attribute, key, rid);
+            default: return insertEntryIntoIndex(ixFileHandle, attribute, key, rid);
+        }
+    }
+
+    void IndexManager::shiftEntriesLeft(char *pagePtr, SizeType entriesToShift, SizeType entrySize) {
+        memmove(pagePtr - entrySize, pagePtr, entriesToShift * entrySize);
+    }
+
+    RC IndexManager::deleteEntryFromOnlyRootIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid) {
+        return -1;
+    }
+
+    RC IndexManager::deleteEntryFromIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid) {
+        return -1;
     }
 
     RC
     IndexManager::deleteEntry(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
         if (ixFileHandle.indexMaxPageNodes == 0) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
-        return -1;
+
+        switch (ixFileHandle.pageCount) {
+            case 0: return -1;
+            case 1: return deleteEntryFromOnlyRootIndex(ixFileHandle, attribute, key, rid);
+            default: return deleteEntryFromIndex(ixFileHandle, attribute, key, rid);
+        }
     }
 
     RC IndexManager::scan(IXFileHandle &ixFileHandle,
