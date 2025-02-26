@@ -294,11 +294,37 @@ namespace PeterDB {
     }
 
     RC IndexManager::deleteEntryFromOnlyRootIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid) {
-        return -1;
+        char rootPage[PAGE_SIZE];
+        if (fh.readPage(0, rootPage) == -1) return -1;
+        SizeType slotCount = *reinterpret_cast<SizeType *>(rootPage);
+        if (slotCount == 0) return -1;
+        SizeType entrySize = nodeEntrySize(attr, true);
+
+        SizeType slotToDelete = determineSlot(rootPage + SLOT_COUNT_BYTES, attr, key, rid, entrySize, slotCount, 1);
+        if (slotToDelete == 0) return -1;
+        char *shiftStart = rootPage + (SLOT_COUNT_BYTES + slotToDelete * entrySize);
+        shiftEntriesLeft(shiftStart, slotCount - slotToDelete, entrySize);
+
+        --slotCount;
+        memmove(rootPage, &slotCount, SLOT_COUNT_BYTES);
+        return fh.writePage(0, rootPage);
     }
 
     RC IndexManager::deleteEntryFromIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid) {
-        return -1;
+        char leafPage[PAGE_SIZE];
+        unsigned leafPageNum;
+        if (getLeafPage(fh, leafPage, leafPageNum, attr, key, rid) == -1) return -1;
+        SizeType entrySize = nodeEntrySize(attr, true);
+        SizeType slotCount = *reinterpret_cast<SizeType *>(leafPage + (LEAF_BYTES_BEFORE_KEYS - SLOT_COUNT_BYTES));
+
+        SizeType slotToDelete = determineSlot(leafPage + LEAF_BYTES_BEFORE_KEYS, attr, key, rid, entrySize, slotCount, 1);
+        if (slotToDelete == 0) return -1;
+        char *shiftStart = leafPage + (LEAF_BYTES_BEFORE_KEYS + slotToDelete * entrySize);
+        shiftEntriesLeft(shiftStart, slotCount - slotToDelete, entrySize);
+
+        --slotCount;
+        memmove(leafPage + (LEAF_BYTES_BEFORE_KEYS - SLOT_COUNT_BYTES), &slotCount, SLOT_COUNT_BYTES);
+        return fh.writePage(leafPageNum, leafPage);
     }
 
     RC
