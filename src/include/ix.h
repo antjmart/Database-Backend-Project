@@ -103,8 +103,10 @@ namespace PeterDB {
         bool lowKeyInclusive;
         bool highKeyInclusive;
         char currPage[PAGE_SIZE];
+        char *currPageKeys;
         SizeType currSlot;
         SizeType currSlotCount;
+        unsigned nextPageNum;
         bool firstScan;
 
     public:
