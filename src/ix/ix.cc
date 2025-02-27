@@ -347,6 +347,7 @@ namespace PeterDB {
                           bool lowKeyInclusive,
                           bool highKeyInclusive,
                           IX_ScanIterator &ix_ScanIterator) {
+        if (!ixFileHandle.file.is_open()) return -1;
         ix_ScanIterator.init(ixFileHandle, attribute, lowKey, highKey, lowKeyInclusive, highKeyInclusive);
         return 0;
     }
@@ -521,7 +522,7 @@ namespace PeterDB {
         }
     }
 
-    IX_ScanIterator::IX_ScanIterator() : fh(nullptr), lowKey(nullptr), highKey(nullptr) {}
+    IX_ScanIterator::IX_ScanIterator() : fh(nullptr), lowKey(nullptr), highKey(nullptr), currPageKeys(nullptr) {}
 
     IX_ScanIterator::~IX_ScanIterator() {}
 
@@ -535,8 +536,43 @@ namespace PeterDB {
         firstScan = true;
     }
 
+    RC IX_ScanIterator::acceptKey(RID &rid, void *key) {
+        return IX_EOF;
+    }
+
     RC IX_ScanIterator::getNextEntry(RID &rid, void *key) {
-        return -1;
+        if (firstScan) {
+            switch (fh->pageCount) {
+                case 0: return IX_EOF;
+                case 2:
+                    if (fh->readPage(0, currPage) == -1) return -1;
+                    if (fh->readPage(1, currPage) == -1) return -1;
+                    memmove(&currSlotCount, currPage, SLOT_COUNT_BYTES);
+                    currPageKeys = currPage + SLOT_COUNT_BYTES;
+                    nextPageNum = 0;
+                    break;
+                default:
+                    unsigned pgNum;
+                    if (IndexManager::instance().getLeafPage(*fh, currPage, pgNum, attr, lowKey, RID{0, 1}) == -1) return -1;
+                    currPageKeys = currPage + LEAF_BYTES_BEFORE_KEYS;
+                    memmove(&currSlotCount, currPageKeys - SLOT_COUNT_BYTES, SLOT_COUNT_BYTES);
+                    memmove(&nextPageNum, currPage + (LEAF_CHECK_BYTE + PAGE_POINTER_BYTES), PAGE_POINTER_BYTES);
+            }
+
+            currSlot = 1;
+            firstScan = false;
+        }
+
+        while (true) {
+            if (currSlot <= currSlotCount)
+                return acceptKey(rid, key);
+
+            if (nextPageNum == 0) return IX_EOF;
+            if (fh->readPage(nextPageNum, currPage) == -1) return -1;
+            memmove(&nextPageNum, currPage + (LEAF_CHECK_BYTE + PAGE_POINTER_BYTES), PAGE_POINTER_BYTES);
+            memmove(&currSlotCount, currPageKeys - SLOT_COUNT_BYTES, SLOT_COUNT_BYTES);
+            currSlot = 1;
+        }
     }
 
     RC IX_ScanIterator::close() {
