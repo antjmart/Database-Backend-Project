@@ -95,6 +95,17 @@ namespace PeterDB {
     };
 
     class IX_ScanIterator {
+        IXFileHandle *fh;
+        Attribute attr;
+        const void *lowKey;
+        const void *highKey;
+        bool lowKeyInclusive;
+        bool highKeyInclusive;
+        char currPage[PAGE_SIZE];
+        SizeType currSlot;
+        SizeType currSlotCount;
+        bool firstScan;
+
     public:
 
         // Constructor
@@ -102,6 +113,9 @@ namespace PeterDB {
 
         // Destructor
         ~IX_ScanIterator();
+
+        // initialize all data members after IndexManager::scan() is called on this iterator
+        void init(IXFileHandle &fh, const Attribute &attr, const void *lowKey, const void *highKey, bool lowKeyInclusive, bool highKeyInclusive);
 
         // Get next matching entry
         RC getNextEntry(RID &rid, void *key);
