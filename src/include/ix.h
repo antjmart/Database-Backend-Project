@@ -37,6 +37,7 @@ namespace PeterDB {
     };
 
     class IndexManager {
+        friend class IX_ScanIterator;
 
     public:
         static IndexManager &instance();
