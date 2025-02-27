@@ -108,9 +108,10 @@ namespace PeterDB {
         SizeType currSlotCount;
         unsigned nextPageNum;
         bool firstScan;
+        SizeType keyEntrySize;
 
-        // success if the current key entry is accepted, fails if falls outside lowKey and highKey conditions
-        RC acceptKey(RID &rid, void *key);
+        // 0 for accepted key, 1 for rejected key, 2 for no more possible acceptable keys (IX_EOF)
+        int acceptKey(RID &rid, void *key);
 
     public:
 
