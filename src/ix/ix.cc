@@ -348,6 +348,7 @@ namespace PeterDB {
                           bool highKeyInclusive,
                           IX_ScanIterator &ix_ScanIterator) {
         if (!ixFileHandle.file.is_open()) return -1;
+        if (ixFileHandle.indexMaxPageNodes == 0) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
         ix_ScanIterator.init(ixFileHandle, attribute, lowKey, highKey, lowKeyInclusive, highKeyInclusive);
         return 0;
     }
@@ -534,10 +535,60 @@ namespace PeterDB {
         this->lowKeyInclusive = lowKeyInclusive;
         this->highKeyInclusive = highKeyInclusive;
         firstScan = true;
+        keyEntrySize = IndexManager::instance().nodeEntrySize(attr, true);
     }
 
-    RC IX_ScanIterator::acceptKey(RID &rid, void *key) {
-        return IX_EOF;
+    int IX_ScanIterator::acceptKey(RID &rid, void *key) {
+        // 0 for success, 1 for rejection, 2 for IX_EOF
+        char *keyLoc = currPageKeys + (currSlot - 1) * keyEntrySize;
+        ++currSlot;
+        switch (attr.type) {
+            case TypeInt: {
+                int entryInt = *reinterpret_cast<int *>(keyLoc);
+                if (lowKey) {
+                    int lowKeyInt = *static_cast<const int *>(lowKey);
+                    if (entryInt < lowKeyInt || (entryInt == lowKeyInt && !lowKeyInclusive)) return 1;
+                }
+                if (highKey) {
+                    int highKeyInt = *static_cast<const int *>(highKey);
+                    if (entryInt > highKeyInt || (entryInt == highKeyInt && !highKeyInclusive)) return 2;
+                }
+                memmove(key, &entryInt, attr.length);
+                keyLoc += attr.length;
+                break;
+            } case TypeReal: {
+                float entryFloat = *reinterpret_cast<float *>(keyLoc);
+                if (lowKey) {
+                    float lowKeyFloat = *static_cast<const float *>(lowKey);
+                    if (entryFloat < lowKeyFloat || (entryFloat == lowKeyFloat && !lowKeyInclusive)) return 1;
+                }
+                if (highKey) {
+                    float highKeyFloat = *static_cast<const float *>(highKey);
+                    if (entryFloat > highKeyFloat || (entryFloat == highKeyFloat && !highKeyInclusive)) return 2;
+                }
+                memmove(key, &entryFloat, attr.length);
+                keyLoc += attr.length;
+                break;
+            } case TypeVarChar: {
+                unsigned len = *reinterpret_cast<unsigned *>(keyLoc);
+                std::string entryStr{keyLoc + INT_BYTES, len};
+                if (lowKey) {
+                    std::string lowKeyStr{static_cast<const char *>(lowKey) + INT_BYTES, *static_cast<const unsigned *>(lowKey)};
+                    if (entryStr < lowKeyStr || (entryStr == lowKeyStr && !lowKeyInclusive)) return 1;
+                }
+                if (highKey) {
+                    std::string highKeyStr{static_cast<const char *>(highKey) + INT_BYTES, *static_cast<const unsigned *>(highKey)};
+                    if (entryStr > highKeyStr || (entryStr == highKeyStr && !highKeyInclusive)) return 2;
+                }
+                memmove(key, &len, INT_BYTES);
+                memmove(static_cast<char *>(key) + INT_BYTES, entryStr.c_str(), len);
+                keyLoc += INT_BYTES + len;
+            }
+        }
+
+        memmove(&rid.pageNum, keyLoc, PAGE_NUM_BYTES);
+        memmove(&rid.slotNum, keyLoc + PAGE_NUM_BYTES, SLOT_BYTES);
+        return 0;
     }
 
     RC IX_ScanIterator::getNextEntry(RID &rid, void *key) {
@@ -564,8 +615,11 @@ namespace PeterDB {
         }
 
         while (true) {
-            if (currSlot <= currSlotCount)
-                return acceptKey(rid, key);
+            while (currSlot <= currSlotCount) {
+                int status = acceptKey(rid, key);
+                if (status == 0) return 0;
+                if (status == 2) return IX_EOF;
+            }
 
             if (nextPageNum == 0) return IX_EOF;
             if (fh->readPage(nextPageNum, currPage) == -1) return -1;
@@ -576,10 +630,8 @@ namespace PeterDB {
     }
 
     RC IX_ScanIterator::close() {
-        if (fh == nullptr) return 0;
-        RC closeStatus = IndexManager::instance().closeFile(*fh);
         fh = nullptr;
-        return closeStatus;
+        return 0;
     }
 
     IXFileHandle::IXFileHandle() : FileHandle(), indexMaxPageNodes(0) {}
