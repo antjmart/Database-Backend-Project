@@ -42,14 +42,14 @@ namespace PeterDB {
         return PagedFileManager::instance().closeFile(ixFileHandle);
     }
 
-    SizeType IndexManager::nodeEntrySize(const Attribute & attr, bool isLeafPage) {
+    SizeType IndexManager::nodeEntrySize(const Attribute & attr, bool isLeafPage) const {
         SizeType entrySize = attr.length + RID_BYTES;
         if (attr.type == TypeVarChar) entrySize += INT_BYTES;
         if (!isLeafPage) entrySize += PAGE_POINTER_BYTES;
         return entrySize;
     }
 
-    SizeType IndexManager::maxNodeSlots(const Attribute & attr) {
+    SizeType IndexManager::maxNodeSlots(const Attribute & attr) const {
         // max index entries on a node determined by parent node layout
         return (PAGE_SIZE - PARENT_BYTES_BEFORE_KEYS) / nodeEntrySize(attr, false);
     }
@@ -91,20 +91,15 @@ namespace PeterDB {
                     low = typeOfSearch == 2 ? ++mid : mid + 1;
             }
         } else {
-            int strLen = *static_cast<const int *>(key);
-            char str[attr.length + 1];
-            memmove(str, static_cast<const char *>(key) + INT_BYTES, strLen);
-            str[strLen] = '\0';
-            Key<std::string> strKey{str, rid};
+            unsigned strLen = *static_cast<const unsigned *>(key);
+            Key<std::string> strKey{{static_cast<const char *>(key) + INT_BYTES, strLen}, rid};
 
             while (low <= high) {
                 mid = (low + high) / 2;
                 slotLoc = pagePtr + (mid - 1) * entrySize;
-                strLen = *reinterpret_cast<int *>(slotLoc);
-                memmove(str, slotLoc + INT_BYTES, strLen);
-                str[strLen] = '\0';
+                strLen = *reinterpret_cast<unsigned *>(slotLoc);
                 RID entryRID{*reinterpret_cast<unsigned *>(slotLoc + (INT_BYTES + strLen)), *reinterpret_cast<unsigned short *>(slotLoc + (INT_BYTES + strLen + PAGE_NUM_BYTES))};
-                Key<std::string> slotKey{str, entryRID};
+                Key<std::string> slotKey{{slotLoc + INT_BYTES, strLen}, entryRID};
 
                 if (strKey < slotKey)
                     high = typeOfSearch == 3 ? --mid : mid - 1;
@@ -352,8 +347,118 @@ namespace PeterDB {
         return -1;
     }
 
-    RC IndexManager::printBTree(IXFileHandle &ixFileHandle, const Attribute &attribute, std::ostream &out) const {
+    void IndexManager::printPageKeys(char *pagePtr, bool isLeafPage, SizeType slotCount, const Attribute &attr, std::ostream &out) const {
+        SizeType entrySize = nodeEntrySize(attr, isLeafPage);
+        char *entryLoc;
+        out << "{\"keys\":[";
+
+        if (isLeafPage) {
+            int prevInt, currInt; float prevFloat, currFloat; std::string prevStr, currStr;
+            for (SizeType slot = 1; slot <= slotCount; ++slot) {
+                entryLoc = pagePtr + (slot - 1) * entrySize;
+
+                if (slot == 1) {
+                    switch (attr.type) {
+                        case TypeInt:
+                            prevInt = *reinterpret_cast<int *>(entryLoc);
+                            out << "\"" << prevInt;
+                            entryLoc += attr.length;
+                            break;
+                        case TypeReal:
+                            prevFloat = *reinterpret_cast<float *>(entryLoc);
+                            out << "\"" << prevFloat;
+                            entryLoc += attr.length;
+                            break;
+                        case TypeVarChar:
+                            unsigned varCharLen = *reinterpret_cast<unsigned *>(entryLoc);
+                            prevStr = std::string{entryLoc + INT_BYTES, varCharLen};
+                            out << "\"" << prevStr;
+                            entryLoc += INT_BYTES + varCharLen;
+                    }
+                    out << ":[(" << *reinterpret_cast<unsigned *>(entryLoc) << ',' << *reinterpret_cast<unsigned short *>(entryLoc + PAGE_NUM_BYTES) << ')';
+                    continue;
+                }
+
+                unsigned ridPage; unsigned short ridSlot;
+                switch (attr.type) {
+                    case TypeInt:
+                        currInt = *reinterpret_cast<int *>(entryLoc);
+                        memmove(&ridPage, entryLoc + attr.length, PAGE_NUM_BYTES);
+                        memmove(&ridSlot, entryLoc + (attr.length + PAGE_NUM_BYTES), SLOT_BYTES);
+                        if (currInt == prevInt) {
+                            out << ",(" << ridPage << ',' << ridSlot << ')';
+                        } else {
+                            out << "]\",\"" << currInt << ":[(" << ridPage << ',' << ridSlot << ')';
+                            prevInt = currInt;
+                        }
+                        break;
+                    case TypeReal:
+                        currFloat = *reinterpret_cast<float *>(entryLoc);
+                        memmove(&ridPage, entryLoc + attr.length, PAGE_NUM_BYTES);
+                        memmove(&ridSlot, entryLoc + (attr.length + PAGE_NUM_BYTES), SLOT_BYTES);
+                        if (currFloat == prevFloat) {
+                            out << ",(" << ridPage << ',' << ridSlot << ')';
+                        } else {
+                            out << "]\",\"" << currFloat << ":[(" << ridPage << ',' << ridSlot << ')';
+                            prevFloat = currFloat;
+                        }
+                        break;
+                    case TypeVarChar:
+                        unsigned varCharLen = *reinterpret_cast<unsigned *>(entryLoc);
+                        currStr = std::string{entryLoc + INT_BYTES, varCharLen};
+                        memmove(&ridPage, entryLoc + (INT_BYTES + varCharLen), PAGE_NUM_BYTES);
+                        memmove(&ridSlot, entryLoc + (INT_BYTES + varCharLen + PAGE_NUM_BYTES), SLOT_BYTES);
+                        if (currStr == prevStr) {
+                            out << ",(" << ridPage << ',' << ridSlot << ')';
+                        } else {
+                            out << "]\",\"" << currStr << ":[(" << ridPage << ',' << ridSlot << ')';
+                            prevStr = currStr;
+                        }
+                }
+            }
+            out << (slotCount == 0 ? "]}" : "]\"]}");
+        } else {
+            for (SizeType slot = 1; slot <= slotCount; ++slot, out << "\"") {
+                out << (slot == 1 ? "\"" : ",\"");
+                entryLoc = pagePtr + (slot - 1) * entrySize;
+
+                switch (attr.type) {
+                    case TypeInt:
+                        out << *reinterpret_cast<int *>(entryLoc);
+                        break;
+                    case TypeReal:
+                        out << *reinterpret_cast<float *>(entryLoc);
+                        break;
+                    case TypeVarChar:
+                        out << std::string{entryLoc + INT_BYTES, *reinterpret_cast<unsigned *>(entryLoc)};
+                }
+            }
+            out << "],\n";
+        }
+    }
+
+    RC IndexManager::printSubtree(unsigned pageNum, unsigned indents, IXFileHandle &fh, const Attribute &attr, std::ostream &out) const {
         return -1;
+    }
+
+    RC IndexManager::printBTree(IXFileHandle &ixFileHandle, const Attribute &attribute, std::ostream &out) const {
+        if (ixFileHandle.indexMaxPageNodes == 0) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
+        char rootPage[PAGE_SIZE];
+
+        switch (ixFileHandle.pageCount) {
+            case 0: return 0;
+            case 2: {
+                if (ixFileHandle.readPage(0, rootPage) == -1) return -1;
+                if (ixFileHandle.readPage(1, rootPage) == -1) return -1;
+                SizeType slotCount = *reinterpret_cast<SizeType *>(rootPage);
+                char *keysStart = rootPage + SLOT_COUNT_BYTES;
+                printPageKeys(keysStart, true, slotCount, attribute, out);
+                out << std::endl;
+                return 0;
+            } default:
+                if (ixFileHandle.readPage(0, rootPage) == -1) return -1;
+                return printSubtree(1, 0, ixFileHandle, attribute, out);
+        }
     }
 
     IX_ScanIterator::IX_ScanIterator() {
