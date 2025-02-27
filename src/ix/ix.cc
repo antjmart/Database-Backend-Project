@@ -540,7 +540,10 @@ namespace PeterDB {
     }
 
     RC IX_ScanIterator::close() {
-        return -1;
+        if (fh == nullptr) return 0;
+        RC closeStatus = IndexManager::instance().closeFile(*fh);
+        fh = nullptr;
+        return closeStatus;
     }
 
     IXFileHandle::IXFileHandle() : FileHandle(), indexMaxPageNodes(0) {}
