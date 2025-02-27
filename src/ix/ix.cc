@@ -245,7 +245,7 @@ namespace PeterDB {
                 memmove(&slotCount, pageData + (LEAF_CHECK_BYTE + PAGE_POINTER_BYTES), SLOT_COUNT_BYTES);
             }
 
-            entryToFollow = determineSlot(keysStart, attr, key, rid, entrySize, slotCount, 3);
+            entryToFollow = key == nullptr ? 0 : determineSlot(keysStart, attr, key, rid, entrySize, slotCount, 3);
             if (entryToFollow == 0) {
                 memmove(&currPageNum, keysStart - PAGE_POINTER_BYTES, PAGE_POINTER_BYTES);
             } else {
@@ -347,7 +347,8 @@ namespace PeterDB {
                           bool lowKeyInclusive,
                           bool highKeyInclusive,
                           IX_ScanIterator &ix_ScanIterator) {
-        return -1;
+        ix_ScanIterator.init(ixFileHandle, attribute, lowKey, highKey, lowKeyInclusive, highKeyInclusive);
+        return 0;
     }
 
     void IndexManager::printPageKeys(char *pagePtr, bool isLeafPage, SizeType slotCount, const Attribute &attr, std::ostream &out) const {
@@ -520,10 +521,18 @@ namespace PeterDB {
         }
     }
 
-    IX_ScanIterator::IX_ScanIterator() {
-    }
+    IX_ScanIterator::IX_ScanIterator() : fh(nullptr), lowKey(nullptr), highKey(nullptr) {}
 
-    IX_ScanIterator::~IX_ScanIterator() {
+    IX_ScanIterator::~IX_ScanIterator() {}
+
+    void IX_ScanIterator::init(IXFileHandle &fh, const Attribute &attr, const void *lowKey, const void *highKey, bool lowKeyInclusive, bool highKeyInclusive) {
+        this->fh = &fh;
+        this->attr = attr;
+        this->lowKey = lowKey;
+        this->highKey = highKey;
+        this->lowKeyInclusive = lowKeyInclusive;
+        this->highKeyInclusive = highKeyInclusive;
+        firstScan = true;
     }
 
     RC IX_ScanIterator::getNextEntry(RID &rid, void *key) {
