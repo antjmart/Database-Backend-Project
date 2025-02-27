@@ -109,6 +109,9 @@ namespace PeterDB {
         unsigned nextPageNum;
         bool firstScan;
 
+        // success if the current key entry is accepted, fails if falls outside lowKey and highKey conditions
+        RC acceptKey(RID &rid, void *key);
+
     public:
 
         // Constructor
