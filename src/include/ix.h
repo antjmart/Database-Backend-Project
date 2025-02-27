@@ -77,8 +77,8 @@ namespace PeterDB {
         IndexManager(const IndexManager &) = default;                               // Prevent construction by copying
         IndexManager &operator=(const IndexManager &) = default;                    // Prevent assignment
 
-        SizeType maxNodeSlots(const Attribute & attr);
-        SizeType nodeEntrySize(const Attribute & attr, bool isLeafPage);
+        SizeType maxNodeSlots(const Attribute & attr) const;
+        SizeType nodeEntrySize(const Attribute & attr, bool isLeafPage) const;
         RC insertEntryIntoEmptyIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
         RC insertEntryIntoOnlyRootIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
         RC insertEntryIntoIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
@@ -90,6 +90,8 @@ namespace PeterDB {
         RC getLeafPage(IXFileHandle &fh, char *pageData, unsigned &pageNum, const Attribute &attr, const void *key, const RID &rid);
         RC deleteEntryFromOnlyRootIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid);
         RC deleteEntryFromIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid);
+        RC printSubtree(unsigned pageNum, unsigned indents, IXFileHandle &fh, const Attribute &attr, std::ostream &out) const;
+        void printPageKeys(char *pagePtr, bool isLeafPage, SizeType slotCount, const Attribute &attr, std::ostream &out) const;
     };
 
     class IX_ScanIterator {
