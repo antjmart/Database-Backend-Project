@@ -104,12 +104,10 @@ namespace PeterDB {
         bool lowKeyInclusive;
         bool highKeyInclusive;
         char currPage[PAGE_SIZE];
-        char *currPageKeys;
-        SizeType currSlot;
-        SizeType currSlotCount;
+        char *currPos;
+        char *endPos;
         unsigned nextPageNum;
         bool firstScan;
-        SizeType keyEntrySize;
 
         // 0 for accepted key, 1 for rejected key, 2 for no more possible acceptable keys (IX_EOF)
         int acceptKey(RID &rid, void *key);
@@ -134,15 +132,11 @@ namespace PeterDB {
 
     class IXFileHandle : public FileHandle {
     public:
-        SizeType indexMaxPageNodes;
-
         // Constructor
         IXFileHandle();
 
         // Destructor
         ~IXFileHandle();
-
-        RC initFileHandle(const std::string &fileName);
     };
 
 }// namespace PeterDB
