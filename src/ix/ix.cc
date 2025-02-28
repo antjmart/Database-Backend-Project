@@ -3,23 +3,17 @@
 #include <iomanip>
 #include <iostream>
 
-constexpr unsigned short SLOT_COUNT_BYTES = sizeof(PeterDB::SizeType);
+constexpr unsigned short OFFSET_BYTES = sizeof(PeterDB::SizeType);
 constexpr unsigned short PAGE_NUM_BYTES = sizeof(unsigned);
 constexpr unsigned short SLOT_BYTES = sizeof(unsigned short);
 constexpr unsigned short RID_BYTES = PAGE_NUM_BYTES + SLOT_BYTES;
 constexpr unsigned short LEAF_CHECK_BYTE = 1;
-constexpr unsigned short LEAF_BYTES_BEFORE_KEYS = LEAF_CHECK_BYTE + PAGE_NUM_BYTES + SLOT_COUNT_BYTES;
-constexpr unsigned short NODE_BYTES_BEFORE_KEYS = LEAF_CHECK_BYTE + SLOT_COUNT_BYTES + PAGE_NUM_BYTES;
+constexpr unsigned short LEAF_BYTES_BEFORE_KEYS = LEAF_CHECK_BYTE + PAGE_NUM_BYTES + OFFSET_BYTES;
+constexpr unsigned short NODE_BYTES_BEFORE_KEYS = LEAF_CHECK_BYTE + OFFSET_BYTES + PAGE_NUM_BYTES;
 constexpr unsigned short INT_BYTES = sizeof(int);
 
 
 namespace PeterDB {
-    RC IXFileHandle::initFileHandle(const std::string &fileName) {
-        if (FileHandle::initFileHandle(fileName) == -1) return -1;
-        indexMaxPageNodes = 0;
-        return 0;
-    }
-
     IndexManager &IndexManager::instance() {
         static IndexManager _index_manager;
         return _index_manager;
@@ -398,7 +392,6 @@ namespace PeterDB {
 
     RC
     IndexManager::insertEntry(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
-        if (ixFileHandle.indexMaxPageNodes == 0) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
         if (ixFileHandle.pageCount == 0)
             return insertEntryIntoEmptyIndex(ixFileHandle, attribute, key, rid);
 
@@ -458,8 +451,6 @@ namespace PeterDB {
 
     RC
     IndexManager::deleteEntry(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
-        if (ixFileHandle.indexMaxPageNodes == 0) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
-
         switch (ixFileHandle.pageCount) {
             case 0: return -1;
             case 2: return deleteEntryFromOnlyRootIndex(ixFileHandle, attribute, key, rid);
@@ -475,7 +466,6 @@ namespace PeterDB {
                           bool highKeyInclusive,
                           IX_ScanIterator &ix_ScanIterator) {
         if (!ixFileHandle.file.is_open()) return -1;
-        if (ixFileHandle.indexMaxPageNodes == 0) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
         ix_ScanIterator.init(ixFileHandle, attribute, lowKey, highKey, lowKeyInclusive, highKeyInclusive);
         return 0;
     }
@@ -624,7 +614,6 @@ namespace PeterDB {
     }
 
     RC IndexManager::printBTree(IXFileHandle &ixFileHandle, const Attribute &attribute, std::ostream &out) const {
-        if (ixFileHandle.indexMaxPageNodes == 0) ixFileHandle.indexMaxPageNodes = maxNodeSlots(attribute);
         if (ixFileHandle.pageCount == 0) return 0;
         char rootPage[PAGE_SIZE];
 
@@ -634,7 +623,8 @@ namespace PeterDB {
         return 0;
     }
 
-    IX_ScanIterator::IX_ScanIterator() : fh(nullptr), lowKey(nullptr), highKey(nullptr), currPageKeys(nullptr) {}
+    IX_ScanIterator::IX_ScanIterator()
+        : fh(nullptr), lowKey(nullptr), highKey(nullptr), currPos(nullptr), endPos(nullptr) {}
 
     IX_ScanIterator::~IX_ScanIterator() {}
 
@@ -646,16 +636,14 @@ namespace PeterDB {
         this->lowKeyInclusive = lowKeyInclusive;
         this->highKeyInclusive = highKeyInclusive;
         firstScan = true;
-        keyEntrySize = IndexManager::instance().nodeEntrySize(attr, true);
     }
 
     int IX_ScanIterator::acceptKey(RID &rid, void *key) {
         // 0 for success, 1 for rejection, 2 for IX_EOF
-        char *keyLoc = currPageKeys + (currSlot - 1) * keyEntrySize;
-        ++currSlot;
         switch (attr.type) {
             case TypeInt: {
-                int entryInt = *reinterpret_cast<int *>(keyLoc);
+                int entryInt = *reinterpret_cast<int *>(currPos);
+                currPos += attr.length + RID_BYTES;
                 if (lowKey) {
                     int lowKeyInt = *static_cast<const int *>(lowKey);
                     if (entryInt < lowKeyInt || (entryInt == lowKeyInt && !lowKeyInclusive)) return 1;
@@ -665,10 +653,10 @@ namespace PeterDB {
                     if (entryInt > highKeyInt || (entryInt == highKeyInt && !highKeyInclusive)) return 2;
                 }
                 memmove(key, &entryInt, attr.length);
-                keyLoc += attr.length;
                 break;
             } case TypeReal: {
                 float entryFloat = *reinterpret_cast<float *>(keyLoc);
+                currPos += attr.length + RID_BYTES;
                 if (lowKey) {
                     float lowKeyFloat = *static_cast<const float *>(lowKey);
                     if (entryFloat < lowKeyFloat || (entryFloat == lowKeyFloat && !lowKeyInclusive)) return 1;
@@ -678,11 +666,11 @@ namespace PeterDB {
                     if (entryFloat > highKeyFloat || (entryFloat == highKeyFloat && !highKeyInclusive)) return 2;
                 }
                 memmove(key, &entryFloat, attr.length);
-                keyLoc += attr.length;
                 break;
             } case TypeVarChar: {
-                unsigned len = *reinterpret_cast<unsigned *>(keyLoc);
-                std::string entryStr{keyLoc + INT_BYTES, len};
+                unsigned len = *reinterpret_cast<unsigned *>(currPos);
+                std::string entryStr{currPos + INT_BYTES, len};
+                currPos += len + INT_BYTES + RID_BYTES;
                 if (lowKey) {
                     std::string lowKeyStr{static_cast<const char *>(lowKey) + INT_BYTES, *static_cast<const unsigned *>(lowKey)};
                     if (entryStr < lowKeyStr || (entryStr == lowKeyStr && !lowKeyInclusive)) return 1;
@@ -693,12 +681,11 @@ namespace PeterDB {
                 }
                 memmove(key, &len, INT_BYTES);
                 memmove(static_cast<char *>(key) + INT_BYTES, entryStr.c_str(), len);
-                keyLoc += INT_BYTES + len;
             }
         }
 
-        memmove(&rid.pageNum, keyLoc, PAGE_NUM_BYTES);
-        memmove(&rid.slotNum, keyLoc + PAGE_NUM_BYTES, SLOT_BYTES);
+        memmove(&rid.pageNum, currPos - RID_BYTES, PAGE_NUM_BYTES);
+        memmove(&rid.slotNum, currPos - SLOT_BYTES, SLOT_BYTES);
         return 0;
     }
 
@@ -707,16 +694,14 @@ namespace PeterDB {
             if (fh->pageCount == 0) return IX_EOF;
             unsigned pgNum;
             if (IndexManager::instance().getLeafPage(*fh, currPage, pgNum, attr, lowKey, RID{0, 1}) == -1) return -1;
-            currPageKeys = currPage + LEAF_BYTES_BEFORE_KEYS;
-            memmove(&currSlotCount, currPageKeys - SLOT_COUNT_BYTES, SLOT_COUNT_BYTES);
+            currPos = currPage + LEAF_BYTES_BEFORE_KEYS;
+            endPos = currPage + *reinterpret_cast<SizeType *>(currPos - OFFSET_BYTES);
             memmove(&nextPageNum, currPage + LEAF_CHECK_BYTE, PAGE_NUM_BYTES);
-
-            currSlot = 1;
             firstScan = false;
         }
 
         while (true) {
-            while (currSlot <= currSlotCount) {
+            while (currPos < endPos) {
                 int status = acceptKey(rid, key);
                 if (status == 0) return 0;
                 if (status == 2) return IX_EOF;
@@ -725,8 +710,8 @@ namespace PeterDB {
             if (nextPageNum == 0) return IX_EOF;
             if (fh->readPage(nextPageNum, currPage) == -1) return -1;
             memmove(&nextPageNum, currPage + LEAF_CHECK_BYTE, PAGE_NUM_BYTES);
-            memmove(&currSlotCount, currPageKeys - SLOT_COUNT_BYTES, SLOT_COUNT_BYTES);
-            currSlot = 1;
+            currPos = currPage + LEAF_BYTES_BEFORE_KEYS;
+            endPos = currPage + *reinterpret_cast<SizeType *>(currPos - OFFSET_BYTES);
         }
     }
 
@@ -735,7 +720,7 @@ namespace PeterDB {
         return 0;
     }
 
-    IXFileHandle::IXFileHandle() : FileHandle(), indexMaxPageNodes(0) {}
+    IXFileHandle::IXFileHandle() : FileHandle() {}
 
     IXFileHandle::~IXFileHandle() = default;
 
