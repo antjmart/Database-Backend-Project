@@ -141,6 +141,7 @@ namespace PeterDB {
         *reinterpret_cast<unsigned *>(rootPage) = 1;
         if (ixFileHandle.appendPage(rootPage) == -1) return -1;  // placing down page to act as "pointer" to root node
         memset(rootPage, 0, LEAF_CHECK_BYTE + PAGE_NUM_BYTES);
+        memset(rootPage, 1, LEAF_CHECK_BYTE);
         *reinterpret_cast<SizeType *>(rootPage + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES)) = 1;
 
         putEntryOnPage(rootPage + LEAF_BYTES_BEFORE_KEYS, attribute, key, rid);
@@ -187,7 +188,7 @@ namespace PeterDB {
             putEntryOnPage(leftPtr + (slot - 1) * entrySize, attr, key, rid, pageNum);
         } else if (slot == leftSlotCount + 1) {
             memmove(rightPtr, leftPtr + leftSlotCount * entrySize, rightSlotCount * entrySize);
-            pushUpKey = nullptr;
+            pushUpKey = key;
         } else {
             memmove(rightPtr, leftPtr + (leftSlotCount + 1) * entrySize, (rightSlotCount - 1) * entrySize);
             pushUpKey = static_cast<const void *>(leftPtr + leftSlotCount * entrySize);
@@ -225,40 +226,125 @@ namespace PeterDB {
         return 0;
     }
 
-    RC IndexManager::visitInsertNode(IXFileHandle &fh, char *pageData, const Attribute &attr, const void *key, const RID &rid, bool & needSplit, void *pushUpKey, RID &pushUpRID, unsigned &childPage) {
-        char pageDa[PAGE_SIZE];
-        if (fh.readPage(pageNum, pageData) == -1) return -1;
-        if (*reinterpret_cast<unsigned char *>(pageData) == 1) break;
-        keysStart = pageData + NODE_BYTES_BEFORE_KEYS;
-        memmove(&slotCount, pageData + LEAF_CHECK_BYTE, SLOT_COUNT_BYTES);
+    RC IndexManager::visitInsertNode(IXFileHandle &fh, char *pageData, unsigned pageNum, const Attribute &attr, const void *key, const RID &rid, bool & needSplit, void *pushUpKey, RID &pushUpRID, unsigned &childPage) {
+        bool isLeaf = *reinterpret_cast<unsigned char *>(pageData) == 1;
+        SizeType entrySize = nodeEntrySize(attr, isLeaf);
 
-        entryToFollow = key == nullptr ? 0 : determineSlot(keysStart, attr, key, rid, entrySize, slotCount, 3);
-        if (entryToFollow == 0) {
-            memmove(&currPageNum, keysStart - PAGE_NUM_BYTES, PAGE_NUM_BYTES);
+        if (isLeaf) {
+            char *keysStart = pageData + LEAF_BYTES_BEFORE_KEYS;
+            SizeType slotCount = *reinterpret_cast<SizeType *>(pageData + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES));
+
+            if (slotCount < fh.indexMaxPageNodes) {
+                SizeType insertSlot = determineSlot(keysStart, attr, key, rid, entrySize, slotCount, 2);
+                char *slotLoc = keysStart + (insertSlot - 1) * entrySize;
+                if (insertSlot <= slotCount) shiftEntriesRight(slotLoc, slotCount - insertSlot + 1, entrySize);
+                putEntryOnPage(slotLoc, attr, key, rid);
+                *reinterpret_cast<SizeType *>(pageData + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES)) = slotCount + 1;
+                needSplit = false;
+                return fh.writePage(pageNum, pageData);
+            } else {
+                needSplit = true;
+                if (attr.type == TypeVarChar)
+                    memmove(pushUpKey, key, INT_BYTES + *static_cast<const int *>(key));
+                else
+                    memmove(pushUpKey, key, attr.length);
+                pushUpRID.pageNum = rid.pageNum;
+                pushUpRID.slotNum = rid.slotNum;
+                return 0;
+            }
         } else {
-            char *entryStart = keysStart + (entryToFollow - 1) * entrySize;
-            if (attr.type == TypeVarChar)
-                memmove(&currPageNum, entryStart + (INT_BYTES + *reinterpret_cast<int *>(entryStart) + RID_BYTES), PAGE_NUM_BYTES);
-            else
-                memmove(&currPageNum, entryStart + (attr.length + RID_BYTES), PAGE_NUM_BYTES);
+            char *keysStart = pageData + NODE_BYTES_BEFORE_KEYS;
+            SizeType slotCount = *reinterpret_cast<SizeType *>(pageData + LEAF_CHECK_BYTE);
+            SizeType entryToFollow = determineSlot(keysStart, attr, key, rid, entrySize, slotCount, 3);
+            unsigned nextVisit;
+            if (entryToFollow == 0) {
+                memmove(&nextVisit, keysStart - PAGE_NUM_BYTES, PAGE_NUM_BYTES);
+            } else {
+                char *entryStart = keysStart + (entryToFollow - 1) * entrySize;
+                if (attr.type == TypeVarChar)
+                    memmove(&nextVisit, entryStart + (INT_BYTES + *reinterpret_cast<int *>(entryStart) + RID_BYTES), PAGE_NUM_BYTES);
+                else
+                    memmove(&nextVisit, entryStart + (attr.length + RID_BYTES), PAGE_NUM_BYTES);
+            }
+
+            char visitPage[PAGE_SIZE];
+            if (fh.readPage(nextVisit, visitPage) == -1) return -1;
+            if (visitInsertNode(fh, visitPage, nextVisit, attr, key, rid, needSplit, pushUpKey, pushUpRID, childPage) == -1) return -1;
+            if (!needSplit) return 0;
+
+            char newPage[PAGE_SIZE];
+            bool leafVisited = *reinterpret_cast<unsigned char *>(visitPage) == 1;
+            SizeType visitEntrySize = nodeEntrySize(attr, leafVisited);
+            SizeType visitSlotCount = *reinterpret_cast<SizeType *>(visitPage + (leafVisited ? LEAF_CHECK_BYTE + PAGE_NUM_BYTES : LEAF_CHECK_BYTE));
+            SizeType slot = determineSlot(visitPage + (leafVisited ? LEAF_BYTES_BEFORE_KEYS : NODE_BYTES_BEFORE_KEYS), attr, pushUpKey, pushUpRID, visitEntrySize, visitSlotCount, 2);
+
+            if (leafVisited) {
+                splitLeaf(fh, visitPage, newPage, attr, pushUpKey, pushUpRID, slot);
+                char *splitKey = newPage + LEAF_BYTES_BEFORE_KEYS;
+                char *ptr = splitKey;
+                if (attr.type == TypeVarChar)
+                    ptr += INT_BYTES + *reinterpret_cast<int *>(ptr);
+                else
+                    ptr += attr.length;
+                RID r{*reinterpret_cast<unsigned *>(ptr), *reinterpret_cast<unsigned short *>(ptr + PAGE_NUM_BYTES)};
+
+                if (slotCount < fh.indexMaxPageNodes) {
+                    slot = determineSlot(pageData + NODE_BYTES_BEFORE_KEYS, attr, splitKey, r, entrySize, slotCount, 2);
+                    char *slotLoc = pageData + NODE_BYTES_BEFORE_KEYS + (slot - 1) * entrySize;
+                    if (slot <= slotCount) shiftEntriesRight(slotLoc, slotCount - slot + 1, entrySize);
+                    putEntryOnPage(slotLoc, attr, splitKey, r, fh.pageCount);
+                    *reinterpret_cast<SizeType *>(pageData + LEAF_CHECK_BYTE) = slotCount + 1;
+                    needSplit = false;
+                    if (fh.writePage(pageNum, pageData) == -1) return -1;
+                } else {
+                    needSplit = true;
+                    memmove(pushUpKey, splitKey, ptr - splitKey);
+                    pushUpRID.pageNum = r.pageNum;
+                    pushUpRID.slotNum = r.slotNum;
+                    childPage = fh.pageCount;
+                }
+            } else {
+                const void *splitKey;
+                splitNode(fh, visitPage, newPage, attr, pushUpKey, pushUpRID, childPage, slot, splitKey);
+                RID r{};
+                if (splitKey == pushUpKey) {
+                    r.pageNum = pushUpRID.pageNum;
+                    r.slotNum = pushUpRID.slotNum;
+                } else {
+                    const char *ptr = static_cast<const char *>(splitKey);
+                    if (attr.type == TypeVarChar)
+                        ptr += INT_BYTES + *reinterpret_cast<const int *>(ptr);
+                    else
+                        ptr += attr.length;
+                    r.pageNum = *reinterpret_cast<const unsigned *>(ptr);
+                    r.slotNum = *reinterpret_cast<const unsigned short *>(ptr + PAGE_NUM_BYTES);
+                    memmove(&childPage, ptr + RID_BYTES, PAGE_NUM_BYTES);
+                }
+                memmove(newPage + (LEAF_CHECK_BYTE + SLOT_COUNT_BYTES), &childPage, PAGE_NUM_BYTES);
+
+                if (slotCount < fh.indexMaxPageNodes) {
+                    slot = determineSlot(pageData + NODE_BYTES_BEFORE_KEYS, attr, splitKey, r, entrySize, slotCount, 2);
+                    char *slotLoc = pageData + NODE_BYTES_BEFORE_KEYS + (slot - 1) * entrySize;
+                    if (slot <= slotCount) shiftEntriesRight(slotLoc, slotCount - slot + 1, entrySize);
+                    putEntryOnPage(slotLoc, attr, splitKey, r, fh.pageCount);
+                    *reinterpret_cast<SizeType *>(pageData + LEAF_CHECK_BYTE) = slotCount + 1;
+                    needSplit = false;
+                    if (fh.writePage(pageNum, pageData) == -1) return -1;
+                } else {
+                    needSplit = true;
+                    if (attr.type == TypeVarChar)
+                        memmove(pushUpKey, splitKey, INT_BYTES + *static_cast<const int *>(splitKey));
+                    else
+                        memmove(pushUpKey, splitKey, attr.length);
+                    pushUpRID.pageNum = r.pageNum;
+                    pushUpRID.slotNum = r.slotNum;
+                    childPage = fh.pageCount;
+                }
+            }
+
+            if (fh.writePage(nextVisit, visitPage) == -1) return -1;
+            return fh.appendPage(newPage);
         }
-
-
-        char leafPage[PAGE_SIZE];
-        unsigned leafPageNum;
-        if (getLeafPage(ixFileHandle, leafPage, leafPageNum, attribute, key, rid) == -1) return -1;
-        SizeType entrySize = nodeEntrySize(attribute, true);
-        SizeType slotCount = *reinterpret_cast<SizeType *>(leafPage + (LEAF_BYTES_BEFORE_KEYS - SLOT_COUNT_BYTES));
-        SizeType insertSlot = determineSlot(leafPage + LEAF_BYTES_BEFORE_KEYS, attribute, key, rid, entrySize, slotCount, 2);
-
-        if (slotCount >= ixFileHandle.indexMaxPageNodes) return -1;  // will not handle splitting, for now
-
-        char *slotLoc = leafPage + (LEAF_BYTES_BEFORE_KEYS + (insertSlot - 1) * entrySize);
-        if (insertSlot <= slotCount) shiftEntriesRight(slotLoc, slotCount - insertSlot + 1, entrySize);
-        putEntryOnPage(slotLoc, attribute, key, rid);
-        ++slotCount;
-        memmove(leafPage + (LEAF_BYTES_BEFORE_KEYS - SLOT_COUNT_BYTES), &slotCount, SLOT_COUNT_BYTES);
-        return ixFileHandle.writePage(leafPageNum, leafPage);
     }
 
     RC IndexManager::createNewRoot(IXFileHandle &fh, char *rootPage, char *rootPtr, const Attribute &attr, const void *rootKey, const RID &rootRID, unsigned childPage) {
@@ -326,7 +412,7 @@ namespace PeterDB {
         unsigned childPage;
         bool needSplit;
         char pushUpKey[attribute.length + INT_BYTES];
-        if (visitInsertNode(ixFileHandle, rootPage, attribute, key, rid, needSplit, pushUpKey, pushUpRID, childPage) == -1) return -1;
+        if (visitInsertNode(ixFileHandle, rootPage, rootPageNum, attribute, key, rid, needSplit, pushUpKey, pushUpRID, childPage) == -1) return -1;
         if (!needSplit) return 0;
         return createNewRoot(ixFileHandle, rootPage, rootPtr, attribute, pushUpKey, pushUpRID, childPage);
     }
@@ -339,17 +425,17 @@ namespace PeterDB {
         char rootPage[PAGE_SIZE];
         if (fh.readPage(0, rootPage) == -1) return -1;
         if (fh.readPage(1, rootPage) == -1) return -1;
-        SizeType slotCount = *reinterpret_cast<SizeType *>(rootPage);
+        SizeType slotCount = *reinterpret_cast<SizeType *>(rootPage + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES));
         if (slotCount == 0) return -1;
         SizeType entrySize = nodeEntrySize(attr, true);
 
-        SizeType slotToDelete = determineSlot(rootPage + SLOT_COUNT_BYTES, attr, key, rid, entrySize, slotCount, 1);
+        SizeType slotToDelete = determineSlot(rootPage + LEAF_BYTES_BEFORE_KEYS, attr, key, rid, entrySize, slotCount, 1);
         if (slotToDelete == 0) return -1;
-        char *shiftStart = rootPage + (SLOT_COUNT_BYTES + slotToDelete * entrySize);
+        char *shiftStart = rootPage + (LEAF_BYTES_BEFORE_KEYS + slotToDelete * entrySize);
         shiftEntriesLeft(shiftStart, slotCount - slotToDelete, entrySize);
 
         --slotCount;
-        memmove(rootPage, &slotCount, SLOT_COUNT_BYTES);
+        memmove(rootPage + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES), &slotCount, SLOT_COUNT_BYTES);
         return fh.writePage(1, rootPage);
     }
 
@@ -502,7 +588,7 @@ namespace PeterDB {
 
         // regular node
         keysStart = pageData + NODE_BYTES_BEFORE_KEYS;
-        memmove(&slotCount, pageData + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES), SLOT_COUNT_BYTES);
+        memmove(&slotCount, pageData + LEAF_CHECK_BYTE, SLOT_COUNT_BYTES);
         printPageKeys(keysStart, false, slotCount, attr, out);
 
         out << std::setw(indents * 4 + 1) << "" << "\"children\":[\n";
