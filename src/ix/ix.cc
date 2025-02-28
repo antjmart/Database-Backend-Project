@@ -456,44 +456,42 @@ namespace PeterDB {
         return 0;
     }
 
-    void IndexManager::printPageKeys(char *pagePtr, bool isLeafPage, SizeType slotCount, const Attribute &attr, std::ostream &out) const {
-        SizeType entrySize = nodeEntrySize(attr, isLeafPage);
-        char *entryLoc;
+    void IndexManager::printPageKeys(char * const pagePtr, bool isLeafPage, char * const endPos, const Attribute &attr, std::ostream &out) const {
+        char *pos = pagePtr;
         out << "{\"keys\":[";
 
         if (isLeafPage) {
             int prevInt, currInt; float prevFloat, currFloat; std::string prevStr, currStr;
-            for (SizeType slot = 1; slot <= slotCount; ++slot) {
-                entryLoc = pagePtr + (slot - 1) * entrySize;
-
-                if (slot == 1) {
+            while (pos < endPos) {
+                if (pos == pagePtr) {
                     switch (attr.type) {
                         case TypeInt:
-                            prevInt = *reinterpret_cast<int *>(entryLoc);
+                            prevInt = *reinterpret_cast<int *>(pos);
                             out << "\"" << prevInt;
-                            entryLoc += attr.length;
+                            pos += attr.length;
                             break;
                         case TypeReal:
-                            prevFloat = *reinterpret_cast<float *>(entryLoc);
+                            prevFloat = *reinterpret_cast<float *>(pos);
                             out << "\"" << prevFloat;
-                            entryLoc += attr.length;
+                            pos += attr.length;
                             break;
                         case TypeVarChar:
-                            unsigned varCharLen = *reinterpret_cast<unsigned *>(entryLoc);
-                            prevStr = std::string{entryLoc + INT_BYTES, varCharLen};
+                            unsigned varCharLen = *reinterpret_cast<unsigned *>(pos);
+                            prevStr = std::string{pos + INT_BYTES, varCharLen};
                             out << "\"" << prevStr;
-                            entryLoc += INT_BYTES + varCharLen;
+                            pos += INT_BYTES + varCharLen;
                     }
-                    out << ":[(" << *reinterpret_cast<unsigned *>(entryLoc) << ',' << *reinterpret_cast<unsigned short *>(entryLoc + PAGE_NUM_BYTES) << ')';
+                    out << ":[(" << *reinterpret_cast<unsigned *>(pos) << ',' << *reinterpret_cast<unsigned short *>(pos + PAGE_NUM_BYTES) << ')';
+                    pos += RID_BYTES;
                     continue;
                 }
 
                 unsigned ridPage; unsigned short ridSlot;
                 switch (attr.type) {
                     case TypeInt:
-                        currInt = *reinterpret_cast<int *>(entryLoc);
-                        memmove(&ridPage, entryLoc + attr.length, PAGE_NUM_BYTES);
-                        memmove(&ridSlot, entryLoc + (attr.length + PAGE_NUM_BYTES), SLOT_BYTES);
+                        currInt = *reinterpret_cast<int *>(pos);
+                        memmove(&ridPage, pos + attr.length, PAGE_NUM_BYTES);
+                        memmove(&ridSlot, pos + (attr.length + PAGE_NUM_BYTES), SLOT_BYTES);
                         if (currInt == prevInt) {
                             out << ",(" << ridPage << ',' << ridSlot << ')';
                         } else {
@@ -502,9 +500,9 @@ namespace PeterDB {
                         }
                         break;
                     case TypeReal:
-                        currFloat = *reinterpret_cast<float *>(entryLoc);
-                        memmove(&ridPage, entryLoc + attr.length, PAGE_NUM_BYTES);
-                        memmove(&ridSlot, entryLoc + (attr.length + PAGE_NUM_BYTES), SLOT_BYTES);
+                        currFloat = *reinterpret_cast<float *>(pos);
+                        memmove(&ridPage, pos + attr.length, PAGE_NUM_BYTES);
+                        memmove(&ridSlot, pos + (attr.length + PAGE_NUM_BYTES), SLOT_BYTES);
                         if (currFloat == prevFloat) {
                             out << ",(" << ridPage << ',' << ridSlot << ')';
                         } else {
@@ -513,10 +511,10 @@ namespace PeterDB {
                         }
                         break;
                     case TypeVarChar:
-                        unsigned varCharLen = *reinterpret_cast<unsigned *>(entryLoc);
-                        currStr = std::string{entryLoc + INT_BYTES, varCharLen};
-                        memmove(&ridPage, entryLoc + (INT_BYTES + varCharLen), PAGE_NUM_BYTES);
-                        memmove(&ridSlot, entryLoc + (INT_BYTES + varCharLen + PAGE_NUM_BYTES), SLOT_BYTES);
+                        unsigned varCharLen = *reinterpret_cast<unsigned *>(pos);
+                        currStr = std::string{pos + INT_BYTES, varCharLen};
+                        memmove(&ridPage, pos + (INT_BYTES + varCharLen), PAGE_NUM_BYTES);
+                        memmove(&ridSlot, pos + (INT_BYTES + varCharLen + PAGE_NUM_BYTES), SLOT_BYTES);
                         if (currStr == prevStr) {
                             out << ",(" << ridPage << ',' << ridSlot << ')';
                         } else {
@@ -524,22 +522,22 @@ namespace PeterDB {
                             prevStr = currStr;
                         }
                 }
+                pos += nodeEntrySize(attr, pos, true);
             }
-            out << (slotCount == 0 ? "]}" : "]\"]}");
+            out << (pagePtr == endPos ? "]}" : "]\"]}");
         } else {
-            for (SizeType slot = 1; slot <= slotCount; ++slot, out << "\"") {
-                out << (slot == 1 ? "\"" : ",\"");
-                entryLoc = pagePtr + (slot - 1) * entrySize;
+            for (; pos < endPos; out << "\"", pos += nodeEntrySize(attr, pos, false)) {
+                out << (pos == pagePtr ? "\"" : ",\"");
 
                 switch (attr.type) {
                     case TypeInt:
-                        out << *reinterpret_cast<int *>(entryLoc);
+                        out << *reinterpret_cast<int *>(pos);
                         break;
                     case TypeReal:
-                        out << *reinterpret_cast<float *>(entryLoc);
+                        out << *reinterpret_cast<float *>(pos);
                         break;
                     case TypeVarChar:
-                        out << std::string{entryLoc + INT_BYTES, *reinterpret_cast<unsigned *>(entryLoc)};
+                        out << std::string{pos + INT_BYTES, *reinterpret_cast<unsigned *>(pos)};
                 }
             }
             out << "],\n";
