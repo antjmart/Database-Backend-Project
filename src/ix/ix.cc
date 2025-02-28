@@ -205,27 +205,24 @@ namespace PeterDB {
     }
 
     RC IndexManager::getLeafPage(IXFileHandle &fh, char *pageData, unsigned &pageNum, const Attribute &attr, const void *key, const RID &rid) {
-        SizeType entrySize = nodeEntrySize(attr, false);
-        char *keysStart;
-        SizeType slotCount, entryToFollow;
+        char *keysStart = pageData + NODE_BYTES_BEFORE_KEYS;
+        char *pos, *end;
         if (fh.readPage(0, pageData) == -1) return -1;
         unsigned currPageNum = *reinterpret_cast<unsigned *>(pageData);
 
         while (true) {
             if (fh.readPage(currPageNum, pageData) == -1) return -1;
             if (*reinterpret_cast<unsigned char *>(pageData) == 1) break;
-            keysStart = pageData + NODE_BYTES_BEFORE_KEYS;
-            memmove(&slotCount, pageData + LEAF_CHECK_BYTE, SLOT_COUNT_BYTES);
+            end = pageData + *reinterpret_cast<SizeType *>(pageData + LEAF_CHECK_BYTE);
 
-            entryToFollow = key == nullptr ? 0 : determineSlot(keysStart, attr, key, rid, entrySize, slotCount, 3);
-            if (entryToFollow == 0) {
+            pos = key == nullptr ? nullptr : determinePos(keysStart, attr, key, rid, end, false, 3);
+            if (pos == nullptr) {
                 memmove(&currPageNum, keysStart - PAGE_NUM_BYTES, PAGE_NUM_BYTES);
             } else {
-                char *entryStart = keysStart + (entryToFollow - 1) * entrySize;
                 if (attr.type == TypeVarChar)
-                    memmove(&currPageNum, entryStart + (INT_BYTES + *reinterpret_cast<int *>(entryStart) + RID_BYTES), PAGE_NUM_BYTES);
+                    memmove(&currPageNum, pos + (INT_BYTES + *reinterpret_cast<int *>(pos) + RID_BYTES), PAGE_NUM_BYTES);
                 else
-                    memmove(&currPageNum, entryStart + (attr.length + RID_BYTES), PAGE_NUM_BYTES);
+                    memmove(&currPageNum, pos + (attr.length + RID_BYTES), PAGE_NUM_BYTES);
             }
         }
 
