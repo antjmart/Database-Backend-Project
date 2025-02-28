@@ -83,12 +83,10 @@ namespace PeterDB {
         char * putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage = 0);
         char * determinePos(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, char *endPtr, bool isLeaf, int typeOfSearch);
         void shiftEntriesRight(char *oldLoc, char *newLoc, SizeType bytesToShift);
-        void shiftEntriesLeft(char *pagePtr, SizeType entriesToShift, SizeType entrySize);
+        void shiftEntriesLeft(char *oldLoc, char *newLoc, SizeType bytesToShift);
         void splitLeaf(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, SizeType slot);
         void splitNode(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, unsigned pageNum, SizeType slot, const void * & pushUpKey);
         RC getLeafPage(IXFileHandle &fh, char *pageData, unsigned &pageNum, const Attribute &attr, const void *key, const RID &rid);
-        RC deleteEntryFromOnlyRootIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid);
-        RC deleteEntryFromIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid);
         RC printSubtree(unsigned pageNum, int indents, IXFileHandle &fh, const Attribute &attr, std::ostream &out) const;
         void printPageKeys(char *pagePtr, bool isLeafPage, SizeType slotCount, const Attribute &attr, std::ostream &out) const;
         RC visitInsertNode(IXFileHandle &fh, char *pageData, unsigned pageNum, const Attribute &attr, const void *key, const RID &rid, bool & needSplit, void *pushUpKey, RID &pushUpRID, unsigned &childPage);
