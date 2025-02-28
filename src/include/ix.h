@@ -78,11 +78,10 @@ namespace PeterDB {
         IndexManager(const IndexManager &) = default;                               // Prevent construction by copying
         IndexManager &operator=(const IndexManager &) = default;                    // Prevent assignment
 
-        SizeType maxNodeSlots(const Attribute & attr) const;
-        SizeType nodeEntrySize(const Attribute & attr, bool isLeafPage) const;
+        SizeType nodeEntrySize(const Attribute & attr, const void *key, bool isLeafPage) const;
         RC insertEntryIntoEmptyIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
         void putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage = 0);
-        SizeType determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, SizeType entrySize, SizeType slotCount, int typeOfSearch);
+        char * determinePos(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, char *endPtr, bool isLeaf, int typeOfSearch);
         void shiftEntriesRight(char *pagePtr, SizeType entriesToShift, SizeType entrySize);
         void shiftEntriesLeft(char *pagePtr, SizeType entriesToShift, SizeType entrySize);
         void splitLeaf(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, SizeType slot);

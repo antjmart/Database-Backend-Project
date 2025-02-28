@@ -35,75 +35,87 @@ namespace PeterDB {
         return PagedFileManager::instance().closeFile(ixFileHandle);
     }
 
-    SizeType IndexManager::nodeEntrySize(const Attribute & attr, bool isLeafPage) const {
-        SizeType entrySize = attr.length + RID_BYTES;
-        if (attr.type == TypeVarChar) entrySize += INT_BYTES;
+    SizeType IndexManager::nodeEntrySize(const Attribute & attr, const void *key, bool isLeafPage) const {
+        SizeType entrySize = RID_BYTES;
+        if (attr.type == TypeVarChar)
+            entrySize += INT_BYTES + *static_cast<const int *>(key);
+        else
+            entrySize += attr.length;
         if (!isLeafPage) entrySize += PAGE_NUM_BYTES;
         return entrySize;
     }
 
-    SizeType IndexManager::maxNodeSlots(const Attribute & attr) const {
-        // max index entries on a node determined by parent node layout
-        return (PAGE_SIZE - NODE_BYTES_BEFORE_KEYS) / nodeEntrySize(attr, false);
-    }
+    char * IndexManager::determinePos(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, char *endPtr, bool isLeaf, int typeOfSearch) {
+        char *prevKey = nullptr;
+        switch (attr.type) {
+            case TypeInt: {
+                Key<int> iKey{*static_cast<const int *>(key), rid};
+                SizeType entrySize = nodeEntrySize(attr, key, isLeaf);
+                while (pagePtr < endPtr) {
+                    RID entryRID{*reinterpret_cast<unsigned *>(pagePtr + attr.length), *reinterpret_cast<unsigned short *>(pagePtr + attr.length + PAGE_NUM_BYTES)};
+                    Key<int> posKey{*reinterpret_cast<int *>(pagePtr), entryRID};
 
-    SizeType IndexManager::determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, SizeType entrySize, SizeType slotCount, int typeOfSearch) {
-        char *slotLoc;
-        SizeType low = 1, high = slotCount, mid = 1;
+                    switch (typeOfSearch) {
+                        case 1:
+                            if (iKey == posKey) return pagePtr;
+                        break;
+                        case 2:
+                            if (iKey <= posKey) return pagePtr;
+                        break;
+                        case 3:
+                            if (iKey < posKey) return prevKey;
+                        prevKey = pagePtr;
+                    }
+                    pagePtr += entrySize;
+                }
+                break;
+            } case TypeReal: {
+                Key<float> fKey{*static_cast<const float *>(key), rid};
+                SizeType entrySize = nodeEntrySize(attr, key, isLeaf);
+                while (pagePtr < endPtr) {
+                    RID entryRID{*reinterpret_cast<unsigned *>(pagePtr + attr.length), *reinterpret_cast<unsigned short *>(pagePtr + attr.length + PAGE_NUM_BYTES)};
+                    Key<float> posKey{*reinterpret_cast<float *>(pagePtr), entryRID};
 
-        if (attr.type == TypeInt) {
-            Key<int> iKey{*static_cast<const int *>(key), rid};
+                    switch (typeOfSearch) {
+                        case 1:
+                            if (fKey == posKey) return pagePtr;
+                        break;
+                        case 2:
+                            if (fKey <= posKey) return pagePtr;
+                        break;
+                        case 3:
+                            if (fKey < posKey) return prevKey;
+                        prevKey = pagePtr;
+                    }
+                    pagePtr += entrySize;
+                }
+                break;
+            } case TypeVarChar: {
+                unsigned strLen = *static_cast<const unsigned *>(key);
+                Key<std::string> strKey{{static_cast<const char *>(key) + INT_BYTES, strLen}, rid};
 
-            while (low <= high) {
-                mid = (low + high) / 2;
-                slotLoc = pagePtr + (mid - 1) * entrySize;
-                RID entryRID{*reinterpret_cast<unsigned *>(slotLoc + attr.length), *reinterpret_cast<unsigned short *>(slotLoc + attr.length + PAGE_NUM_BYTES)};
-                Key<int> slotKey{*reinterpret_cast<int *>(slotLoc), entryRID};
+                while (pagePtr < endPtr) {
+                    strLen = *reinterpret_cast<unsigned *>(pagePtr);
+                    RID entryRID{*reinterpret_cast<unsigned *>(pagePtr + (INT_BYTES + strLen)), *reinterpret_cast<unsigned short *>(pagePtr + (INT_BYTES + strLen + PAGE_NUM_BYTES))};
+                    Key<std::string> posKey{{pagePtr + INT_BYTES, strLen}, entryRID};
 
-                if (iKey < slotKey)
-                    high = typeOfSearch == 3 ? --mid : mid - 1;
-                else if (iKey == slotKey)
-                    return mid;
-                else
-                    low = typeOfSearch == 2 ? ++mid : mid + 1;
-            }
-        } else if (attr.type == TypeReal) {
-            Key<float> fKey{*static_cast<const float *>(key), rid};
-
-            while (low <= high) {
-                mid = (low + high) / 2;
-                slotLoc = pagePtr + (mid - 1) * entrySize;
-                RID entryRID{*reinterpret_cast<unsigned *>(slotLoc + attr.length), *reinterpret_cast<unsigned short *>(slotLoc + attr.length + PAGE_NUM_BYTES)};
-                Key<float> slotKey{*reinterpret_cast<float *>(slotLoc), entryRID};
-
-                if (fKey < slotKey)
-                    high = typeOfSearch == 3 ? --mid : mid - 1;
-                else if (fKey == slotKey)
-                    return mid;
-                else
-                    low = typeOfSearch == 2 ? ++mid : mid + 1;
-            }
-        } else {
-            unsigned strLen = *static_cast<const unsigned *>(key);
-            Key<std::string> strKey{{static_cast<const char *>(key) + INT_BYTES, strLen}, rid};
-
-            while (low <= high) {
-                mid = (low + high) / 2;
-                slotLoc = pagePtr + (mid - 1) * entrySize;
-                strLen = *reinterpret_cast<unsigned *>(slotLoc);
-                RID entryRID{*reinterpret_cast<unsigned *>(slotLoc + (INT_BYTES + strLen)), *reinterpret_cast<unsigned short *>(slotLoc + (INT_BYTES + strLen + PAGE_NUM_BYTES))};
-                Key<std::string> slotKey{{slotLoc + INT_BYTES, strLen}, entryRID};
-
-                if (strKey < slotKey)
-                    high = typeOfSearch == 3 ? --mid : mid - 1;
-                else if (strKey == slotKey)
-                    return mid;
-                else
-                    low = typeOfSearch == 2 ? ++mid : mid + 1;
+                    switch (typeOfSearch) {
+                        case 1:
+                            if (strKey == posKey) return pagePtr;
+                        break;
+                        case 2:
+                            if (strKey <= posKey) return pagePtr;
+                        break;
+                        case 3:
+                            if (strKey < posKey) return prevKey;
+                        prevKey = pagePtr;
+                    }
+                    pagePtr += nodeEntrySize(attr, pagePtr, isLeaf);
+                }
             }
         }
 
-        return typeOfSearch == 1 ? 0 : mid;
+        return typeOfSearch == 3 ? prevKey : endPtr;
     }
 
     void IndexManager::shiftEntriesRight(char *pagePtr, SizeType entriesToShift, SizeType entrySize) {
