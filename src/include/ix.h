@@ -81,19 +81,19 @@ namespace PeterDB {
         SizeType maxNodeSlots(const Attribute & attr) const;
         SizeType nodeEntrySize(const Attribute & attr, bool isLeafPage) const;
         RC insertEntryIntoEmptyIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
-        RC insertEntryIntoOnlyRootIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
-        RC insertEntryIntoIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
         void putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage = 0);
         SizeType determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, SizeType entrySize, SizeType slotCount, int typeOfSearch);
         void shiftEntriesRight(char *pagePtr, SizeType entriesToShift, SizeType entrySize);
         void shiftEntriesLeft(char *pagePtr, SizeType entriesToShift, SizeType entrySize);
         void splitLeaf(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, SizeType slot);
-        void splitNode(IXFileHandle &fh, char *pageData, char *newPage, const Attribute &attr, const void *key, const RID &rid, unsigned pageNum, SizeType slot, const void * & pushUpKey);
+        void splitNode(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, unsigned pageNum, SizeType slot, const void * & pushUpKey);
         RC getLeafPage(IXFileHandle &fh, char *pageData, unsigned &pageNum, const Attribute &attr, const void *key, const RID &rid);
         RC deleteEntryFromOnlyRootIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid);
         RC deleteEntryFromIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid);
         RC printSubtree(unsigned pageNum, int indents, IXFileHandle &fh, const Attribute &attr, std::ostream &out) const;
         void printPageKeys(char *pagePtr, bool isLeafPage, SizeType slotCount, const Attribute &attr, std::ostream &out) const;
+        RC visitInsertNode(IXFileHandle &fh, char *pageData, const Attribute &attr, const void *key, const RID &rid, bool & needSplit, void *pushUpKey, RID &pushUpRID, unsigned &childPage);
+        RC createNewRoot(IXFileHandle &fh, char *rootPage, char *rootPtr, const Attribute &attr, const void *rootKey, const RID &rootRID, unsigned childPage);
     };
 
     class IX_ScanIterator {
