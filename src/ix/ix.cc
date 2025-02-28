@@ -229,7 +229,7 @@ namespace PeterDB {
     RC IndexManager::visitInsertNode(IXFileHandle &fh, char *pageData, unsigned pageNum, const Attribute &attr, const void *key, const RID &rid, bool & needSplit, void *pushUpKey, RID &pushUpRID, unsigned &childPage) {
         bool isLeaf = *reinterpret_cast<unsigned char *>(pageData) == 1;
         SizeType entrySize = nodeEntrySize(attr, isLeaf);
-
+        
         if (isLeaf) {
             char *keysStart = pageData + LEAF_BYTES_BEFORE_KEYS;
             SizeType slotCount = *reinterpret_cast<SizeType *>(pageData + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES));
@@ -351,8 +351,8 @@ namespace PeterDB {
         bool rootIsLeaf = *reinterpret_cast<unsigned char *>(rootPage) == 1;
         unsigned rootPageNum = *reinterpret_cast<unsigned *>(rootPtr);
         SizeType entrySize = nodeEntrySize(attr, rootIsLeaf);
-        SizeType slotCount = *reinterpret_cast<SizeType *>(rootPage + (rootIsLeaf ? LEAF_CHECK_BYTE + PAGE_NUM_BYTES : LEAF_CHECK_BYTE));
-        SizeType slot = determineSlot(rootPage, attr, rootKey, rootRID, entrySize, slotCount, 2);
+        SizeType slotCount = fh.indexMaxPageNodes;
+        SizeType slot = determineSlot(rootPage + (rootIsLeaf ? LEAF_BYTES_BEFORE_KEYS : NODE_BYTES_BEFORE_KEYS), attr, rootKey, rootRID, entrySize, slotCount, 2);
         char newPage[PAGE_SIZE];
         char newRoot[PAGE_SIZE];
         memset(newRoot, 0, LEAF_CHECK_BYTE);
@@ -411,7 +411,7 @@ namespace PeterDB {
         RID pushUpRID{};
         unsigned childPage;
         bool needSplit;
-        char pushUpKey[attribute.length + INT_BYTES];
+        char pushUpKey[attribute.length + INT_BYTES + RID_BYTES + PAGE_NUM_BYTES];
         if (visitInsertNode(ixFileHandle, rootPage, rootPageNum, attribute, key, rid, needSplit, pushUpKey, pushUpRID, childPage) == -1) return -1;
         if (!needSplit) return 0;
         return createNewRoot(ixFileHandle, rootPage, rootPtr, attribute, pushUpKey, pushUpRID, childPage);
