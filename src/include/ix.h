@@ -92,7 +92,7 @@ namespace PeterDB {
         RC deleteEntryFromIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid);
         RC printSubtree(unsigned pageNum, int indents, IXFileHandle &fh, const Attribute &attr, std::ostream &out) const;
         void printPageKeys(char *pagePtr, bool isLeafPage, SizeType slotCount, const Attribute &attr, std::ostream &out) const;
-        RC visitInsertNode(IXFileHandle &fh, char *pageData, const Attribute &attr, const void *key, const RID &rid, bool & needSplit, void *pushUpKey, RID &pushUpRID, unsigned &childPage);
+        RC visitInsertNode(IXFileHandle &fh, char *pageData, unsigned pageNum, const Attribute &attr, const void *key, const RID &rid, bool & needSplit, void *pushUpKey, RID &pushUpRID, unsigned &childPage);
         RC createNewRoot(IXFileHandle &fh, char *rootPage, char *rootPtr, const Attribute &attr, const void *rootKey, const RID &rootRID, unsigned childPage);
     };
 
