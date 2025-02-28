@@ -80,9 +80,9 @@ namespace PeterDB {
 
         SizeType nodeEntrySize(const Attribute & attr, const void *key, bool isLeafPage) const;
         RC insertEntryIntoEmptyIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
-        void putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage = 0);
+        char * putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage = 0);
         char * determinePos(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, char *endPtr, bool isLeaf, int typeOfSearch);
-        void shiftEntriesRight(char *pagePtr, SizeType entriesToShift, SizeType entrySize);
+        void shiftEntriesRight(char *oldLoc, char *newLoc, SizeType bytesToShift);
         void shiftEntriesLeft(char *pagePtr, SizeType entriesToShift, SizeType entrySize);
         void splitLeaf(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, SizeType slot);
         void splitNode(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, unsigned pageNum, SizeType slot, const void * & pushUpKey);

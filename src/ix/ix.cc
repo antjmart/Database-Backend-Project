@@ -118,11 +118,11 @@ namespace PeterDB {
         return typeOfSearch == 3 ? prevKey : endPtr;
     }
 
-    void IndexManager::shiftEntriesRight(char *pagePtr, SizeType entriesToShift, SizeType entrySize) {
-        memmove(pagePtr + entrySize, pagePtr, entriesToShift * entrySize);
+    void IndexManager::shiftEntriesRight(char *oldLoc, char *newLoc, SizeType bytesToShift) {
+        memmove(newLoc, oldLoc, bytesToShift);
     }
 
-    void IndexManager::putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage) {
+    char * IndexManager::putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage) {
         if (attr.type == TypeVarChar) {
             int varCharLen = *static_cast<const int *>(key);
             memmove(pagePtr, key, varCharLen + INT_BYTES);
@@ -135,11 +135,13 @@ namespace PeterDB {
         memmove(pagePtr, &rid.pageNum, PAGE_NUM_BYTES);
         pagePtr += PAGE_NUM_BYTES;
         memmove(pagePtr, &rid.slotNum, SLOT_BYTES);
+        pagePtr += SLOT_BYTES;
 
         if (childPage > 0) {
-            pagePtr += SLOT_BYTES;
             memmove(pagePtr, &childPage, PAGE_NUM_BYTES);
+            pagePtr += PAGE_NUM_BYTES;
         }
+        return pagePtr;
     }
 
     RC IndexManager::insertEntryIntoEmptyIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid) {
@@ -148,9 +150,8 @@ namespace PeterDB {
         if (ixFileHandle.appendPage(rootPage) == -1) return -1;  // placing down page to act as "pointer" to root node
         memset(rootPage, 0, LEAF_CHECK_BYTE + PAGE_NUM_BYTES);
         memset(rootPage, 1, LEAF_CHECK_BYTE);
-        *reinterpret_cast<SizeType *>(rootPage + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES)) = 1;
-
-        putEntryOnPage(rootPage + LEAF_BYTES_BEFORE_KEYS, attribute, key, rid);
+        char *endPos = putEntryOnPage(rootPage + LEAF_BYTES_BEFORE_KEYS, attribute, key, rid);
+        *reinterpret_cast<SizeType *>(rootPage + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES)) = endPos - rootPage;
         return ixFileHandle.appendPage(rootPage);
     }
 
