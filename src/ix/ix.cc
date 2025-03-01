@@ -547,49 +547,47 @@ namespace PeterDB {
     RC IndexManager::printSubtree(unsigned pageNum, int indents, IXFileHandle &fh, const Attribute &attr, std::ostream &out) const {
         char *pageData = new char[PAGE_SIZE];
         if (fh.readPage(pageNum, pageData) == -1) {delete[] pageData; return -1;}
-        char *keysStart;
-        SizeType slotCount;
+        char *keysStart, *end;
         out << std::setw(indents * 4) << "";
 
         if (*reinterpret_cast<unsigned char *>(pageData) == 1) {
             // leaf node
             keysStart = pageData + LEAF_BYTES_BEFORE_KEYS;
-            memmove(&slotCount, keysStart - SLOT_COUNT_BYTES, SLOT_COUNT_BYTES);
-            printPageKeys(keysStart, true, slotCount, attr, out);
+            end = pageData + *reinterpret_cast<SizeType *>(keysStart - OFFSET_BYTES);
+            printPageKeys(keysStart, true, end, attr, out);
             delete[] pageData;
             return 0;
         }
 
         // regular node
         keysStart = pageData + NODE_BYTES_BEFORE_KEYS;
-        memmove(&slotCount, pageData + LEAF_CHECK_BYTE, SLOT_COUNT_BYTES);
-        printPageKeys(keysStart, false, slotCount, attr, out);
+        end = pageData + *reinterpret_cast<SizeType *>(pageData + LEAF_CHECK_BYTE);
+        printPageKeys(keysStart, false, end, attr, out);
 
         out << std::setw(indents * 4 + 1) << "" << "\"children\":[\n";
-        if (slotCount > 0) {
-            SizeType entrySize = nodeEntrySize(attr, false);
-            char *slotLoc;
+        if (end > keysStart) {
+            char *pos = keysStart;
             unsigned childPage = *reinterpret_cast<unsigned *>(keysStart - PAGE_NUM_BYTES);
             std::vector<unsigned> childPages;
-            childPages.reserve(slotCount + 1);
             childPages.push_back(childPage);
 
-            for (SizeType slot = 1; slot <= slotCount; ++slot) {
-                slotLoc = keysStart + (slot - 1) * entrySize;
+            while (pos < end) {
                 if (attr.type == TypeVarChar)
-                    memmove(&childPage, slotLoc + (INT_BYTES + *reinterpret_cast<int *>(slotLoc) + RID_BYTES), PAGE_NUM_BYTES);
+                    memmove(&childPage, pos + (INT_BYTES + *reinterpret_cast<int *>(pos) + RID_BYTES), PAGE_NUM_BYTES);
                 else
-                    memmove(&childPage, slotLoc + (attr.length + RID_BYTES), PAGE_NUM_BYTES);
+                    memmove(&childPage, pos + (attr.length + RID_BYTES), PAGE_NUM_BYTES);
 
                 childPages.push_back(childPage);
+                pos += nodeEntrySize(attr, pos, false);
             }
 
             delete[] pageData;
-            for (SizeType i = 0; i < slotCount; ++i) {
+            unsigned last = childPages.size() - 1;
+            for (unsigned i = 0; i < last; ++i) {
                 if (printSubtree(childPages[i], indents + 1, fh, attr, out) == -1) return -1;
                 out << ",\n";
             }
-            if (printSubtree(childPages[slotCount], indents + 1, fh, attr, out) == -1) return -1;
+            if (printSubtree(childPages[last], indents + 1, fh, attr, out) == -1) return -1;
             out << '\n';
         } else
             delete[] pageData;
