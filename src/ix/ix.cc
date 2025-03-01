@@ -155,31 +155,39 @@ namespace PeterDB {
         return ixFileHandle.appendPage(rootPage);
     }
 
-    void IndexManager::splitLeaf(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, SizeType slot) {
+    void IndexManager::splitLeaf(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, char *insertPos) {
+        char newLeft[PAGE_SIZE];
+        memset(newLeft, 1, LEAF_CHECK_BYTE);
         memset(rightPage, 1, LEAF_CHECK_BYTE);
         memmove(rightPage + LEAF_CHECK_BYTE, leftPage + LEAF_CHECK_BYTE, PAGE_NUM_BYTES);
-        memmove(leftPage + LEAF_CHECK_BYTE, &fh.pageCount, PAGE_NUM_BYTES);
-        SizeType leftSlotCount = (fh.indexMaxPageNodes + 1) / 2;
-        SizeType rightSlotCount = fh.indexMaxPageNodes + 1 - leftSlotCount;
+        memmove(newLeft + LEAF_CHECK_BYTE, &fh.pageCount, PAGE_NUM_BYTES);
         char *leftPtr = leftPage + LEAF_BYTES_BEFORE_KEYS;
         char *rightPtr = rightPage + LEAF_BYTES_BEFORE_KEYS;
-        memmove(leftPage + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES), &leftSlotCount, SLOT_COUNT_BYTES);
-        memmove(rightPage + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES), &rightSlotCount, SLOT_COUNT_BYTES);
-        SizeType entrySize = nodeEntrySize(attr, true);
+        char *newPtr = newLeft + LEAF_BYTES_BEFORE_KEYS;
+        char *leftEnd = leftPage + *reinterpret_cast<SizeType *>(leftPtr - OFFSET_BYTES);
 
-        if (slot <= leftSlotCount) {
-            memmove(rightPtr, leftPtr + (leftSlotCount - 1) * entrySize, rightSlotCount * entrySize);
-            shiftEntriesRight(leftPtr + (slot - 1) * entrySize, leftSlotCount - slot, entrySize);
-            putEntryOnPage(leftPtr + (slot - 1) * entrySize, attr, key, rid);
-        } else {
-            memmove(rightPtr, leftPtr + leftSlotCount * entrySize, (fh.indexMaxPageNodes - leftSlotCount) * entrySize);
-            shiftEntriesRight(rightPtr + (slot - leftSlotCount - 1) * entrySize, rightSlotCount - (slot - leftSlotCount), entrySize);
-            putEntryOnPage(rightPtr + (slot - leftSlotCount - 1) * entrySize, attr, key, rid);
+        char * & ptr = newPtr;
+        SizeType entrySize;
+        while (leftPtr < leftEnd) {
+            ptr = (newPtr - newLeft < PAGE_SIZE / 2) ? newPtr : rightPtr;
+            if (leftPtr == insertPos) {
+                ptr = putEntryOnPage(ptr, attr, key, rid);
+            } else {
+                entrySize = nodeEntrySize(attr, leftPtr, true);
+                memmove(ptr, leftPtr, entrySize);
+                ptr += entrySize;
+                leftPtr += entrySize;
+            }
         }
+
+        if (insertPos == leftEnd) rightPtr = putEntryOnPage(rightPtr, attr, key, rid);
+        *reinterpret_cast<SizeType *>(newLeft + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES)) = newPtr - newLeft;
+        *reinterpret_cast<SizeType *>(rightPage + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES)) = rightPtr - rightPage;
+        memmove(leftPage, newLeft, PAGE_SIZE);
     }
 
     void IndexManager::splitNode(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, unsigned pageNum, SizeType slot, const void * & pushUpKey) {
-        memset(rightPage, 0, LEAF_CHECK_BYTE);
+        /*memset(rightPage, 0, LEAF_CHECK_BYTE);
         SizeType leftSlotCount = fh.indexMaxPageNodes / 2;
         SizeType rightSlotCount = fh.indexMaxPageNodes - leftSlotCount;
         char *leftPtr = leftPage + NODE_BYTES_BEFORE_KEYS;
@@ -201,7 +209,7 @@ namespace PeterDB {
             pushUpKey = static_cast<const void *>(leftPtr + leftSlotCount * entrySize);
             shiftEntriesRight(rightPtr + (slot - leftSlotCount - 2) * entrySize, rightSlotCount - (slot - leftSlotCount - 1), entrySize);
             putEntryOnPage(rightPtr + (slot - leftSlotCount - 2) * entrySize, attr, key, rid, pageNum);
-        }
+        }*/
     }
 
     RC IndexManager::getLeafPage(IXFileHandle &fh, char *pageData, unsigned &pageNum, const Attribute &attr, const void *key, const RID &rid) {
@@ -232,18 +240,16 @@ namespace PeterDB {
 
     RC IndexManager::visitInsertNode(IXFileHandle &fh, char *pageData, unsigned pageNum, const Attribute &attr, const void *key, const RID &rid, bool & needSplit, void *pushUpKey, RID &pushUpRID, unsigned &childPage) {
         bool isLeaf = *reinterpret_cast<unsigned char *>(pageData) == 1;
-        SizeType entrySize = nodeEntrySize(attr, isLeaf);
         
         if (isLeaf) {
             char *keysStart = pageData + LEAF_BYTES_BEFORE_KEYS;
-            SizeType slotCount = *reinterpret_cast<SizeType *>(pageData + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES));
-
-            if (slotCount < fh.indexMaxPageNodes) {
-                SizeType insertSlot = determineSlot(keysStart, attr, key, rid, entrySize, slotCount, 2);
-                char *slotLoc = keysStart + (insertSlot - 1) * entrySize;
-                if (insertSlot <= slotCount) shiftEntriesRight(slotLoc, slotCount - insertSlot + 1, entrySize);
-                putEntryOnPage(slotLoc, attr, key, rid);
-                *reinterpret_cast<SizeType *>(pageData + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES)) = slotCount + 1;
+            char *endPos = pageData + *reinterpret_cast<SizeType *>(keysStart - OFFSET_BYTES);
+            SizeType entrySize = nodeEntrySize(attr, key, true);
+            if (entrySize + (endPos - pageData) <= PAGE_SIZE) {
+                char *insertPos = determinePos(keysStart, attr, key, rid, endPos, true, 2);
+                if (insertPos < endPos) shiftEntriesRight(insertPos, insertPos + entrySize, endPos - insertPos);
+                putEntryOnPage(insertPos, attr, key, rid);
+                *reinterpret_cast<SizeType *>(pageData + (LEAF_CHECK_BYTE + PAGE_NUM_BYTES)) = (endPos + entrySize) - pageData;
                 needSplit = false;
                 return fh.writePage(pageNum, pageData);
             } else {
@@ -256,7 +262,7 @@ namespace PeterDB {
                 pushUpRID.slotNum = rid.slotNum;
                 return 0;
             }
-        } else {
+        } /*else {
             char *keysStart = pageData + NODE_BYTES_BEFORE_KEYS;
             SizeType slotCount = *reinterpret_cast<SizeType *>(pageData + LEAF_CHECK_BYTE);
             SizeType entryToFollow = determineSlot(keysStart, attr, key, rid, entrySize, slotCount, 3);
@@ -348,32 +354,32 @@ namespace PeterDB {
 
             if (fh.writePage(nextVisit, visitPage) == -1) return -1;
             return fh.appendPage(newPage);
-        }
+        }*/return 0;
     }
 
     RC IndexManager::createNewRoot(IXFileHandle &fh, char *rootPage, char *rootPtr, const Attribute &attr, const void *rootKey, const RID &rootRID, unsigned childPage) {
         bool rootIsLeaf = *reinterpret_cast<unsigned char *>(rootPage) == 1;
         unsigned rootPageNum = *reinterpret_cast<unsigned *>(rootPtr);
-        SizeType entrySize = nodeEntrySize(attr, rootIsLeaf);
-        SizeType slotCount = fh.indexMaxPageNodes;
-        SizeType slot = determineSlot(rootPage + (rootIsLeaf ? LEAF_BYTES_BEFORE_KEYS : NODE_BYTES_BEFORE_KEYS), attr, rootKey, rootRID, entrySize, slotCount, 2);
+        char *keysStart = rootPage + (rootIsLeaf ? LEAF_BYTES_BEFORE_KEYS : NODE_BYTES_BEFORE_KEYS);
+        char *endPos = rootPage + *reinterpret_cast<SizeType *>(rootPage + (LEAF_CHECK_BYTE + rootIsLeaf ? PAGE_NUM_BYTES : 0));
+        char *insertPos = determinePos(keysStart, attr, rootKey, rootRID, endPos, rootIsLeaf, 2);
         char newPage[PAGE_SIZE];
         char newRoot[PAGE_SIZE];
         memset(newRoot, 0, LEAF_CHECK_BYTE);
-        *reinterpret_cast<SizeType *>(newRoot + LEAF_CHECK_BYTE) = 1;
-        memmove(newRoot + (LEAF_CHECK_BYTE + SLOT_COUNT_BYTES), &rootPageNum, PAGE_NUM_BYTES);
+        memmove(newRoot + (LEAF_CHECK_BYTE + OFFSET_BYTES), &rootPageNum, PAGE_NUM_BYTES);
 
         if (rootIsLeaf) {
-            splitLeaf(fh, rootPage, newPage, attr, rootKey, rootRID, slot);
+            splitLeaf(fh, rootPage, newPage, attr, rootKey, rootRID, insertPos);
             char *ptr = newPage + LEAF_BYTES_BEFORE_KEYS;
             if (attr.type == TypeVarChar)
                 ptr += INT_BYTES + *reinterpret_cast<int *>(ptr);
             else
                 ptr += attr.length;
             RID r{*reinterpret_cast<unsigned *>(ptr), *reinterpret_cast<unsigned short *>(ptr + PAGE_NUM_BYTES)};
-            putEntryOnPage(newRoot + NODE_BYTES_BEFORE_KEYS, attr, newPage + LEAF_BYTES_BEFORE_KEYS, r, fh.pageCount);
+            char *newRootEnd = putEntryOnPage(newRoot + NODE_BYTES_BEFORE_KEYS, attr, newPage + LEAF_BYTES_BEFORE_KEYS, r, fh.pageCount);
+            *reinterpret_cast<SizeType *>(newRoot + LEAF_CHECK_BYTE) = newRootEnd - newRoot;
         } else {
-            const void *splitKey;
+            /*const void *splitKey;
             splitNode(fh, rootPage, newPage, attr, rootKey, rootRID, childPage, slot, splitKey);
             RID r{};
             if (splitKey == rootKey) {
@@ -390,7 +396,7 @@ namespace PeterDB {
                 memmove(&childPage, ptr + RID_BYTES, PAGE_NUM_BYTES);
             }
             memmove(newPage + (LEAF_CHECK_BYTE + SLOT_COUNT_BYTES), &childPage, PAGE_NUM_BYTES);
-            putEntryOnPage(newRoot + NODE_BYTES_BEFORE_KEYS, attr, splitKey, r, fh.pageCount);
+            putEntryOnPage(newRoot + NODE_BYTES_BEFORE_KEYS, attr, splitKey, r, fh.pageCount);*/
         }
 
         if (fh.writePage(rootPageNum, rootPage) == -1) return -1;
@@ -637,7 +643,7 @@ namespace PeterDB {
                 memmove(key, &entryInt, attr.length);
                 break;
             } case TypeReal: {
-                float entryFloat = *reinterpret_cast<float *>(keyLoc);
+                float entryFloat = *reinterpret_cast<float *>(currPos);
                 currPos += attr.length + RID_BYTES;
                 if (lowKey) {
                     float lowKeyFloat = *static_cast<const float *>(lowKey);
