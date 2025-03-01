@@ -85,7 +85,7 @@ namespace PeterDB {
         void shiftEntriesRight(char *oldLoc, char *newLoc, SizeType bytesToShift);
         void shiftEntriesLeft(char *oldLoc, char *newLoc, SizeType bytesToShift);
         void splitLeaf(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, char *insertPos);
-        void splitNode(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, unsigned pageNum, SizeType slot, const void * & pushUpKey);
+        void splitNode(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, unsigned pageNum, char *insertPos, void *pushUpKey);
         RC getLeafPage(IXFileHandle &fh, char *pageData, unsigned &pageNum, const Attribute &attr, const void *key, const RID &rid);
         RC printSubtree(unsigned pageNum, int indents, IXFileHandle &fh, const Attribute &attr, std::ostream &out) const;
         void printPageKeys(char * const pagePtr, bool isLeafPage, char * const endPos, const Attribute &attr, std::ostream &out) const;
