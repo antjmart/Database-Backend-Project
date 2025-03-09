@@ -78,20 +78,17 @@ namespace PeterDB {
         IndexManager(const IndexManager &) = default;                               // Prevent construction by copying
         IndexManager &operator=(const IndexManager &) = default;                    // Prevent assignment
 
-        SizeType maxNodeSlots(const Attribute & attr) const;
-        SizeType nodeEntrySize(const Attribute & attr, bool isLeafPage) const;
+        SizeType nodeEntrySize(const Attribute & attr, const void *key, bool isLeafPage) const;
         RC insertEntryIntoEmptyIndex(IXFileHandle &ixFileHandle, const Attribute &attribute, const void *key, const RID &rid);
-        void putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage = 0);
-        SizeType determineSlot(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, SizeType entrySize, SizeType slotCount, int typeOfSearch);
-        void shiftEntriesRight(char *pagePtr, SizeType entriesToShift, SizeType entrySize);
-        void shiftEntriesLeft(char *pagePtr, SizeType entriesToShift, SizeType entrySize);
-        void splitLeaf(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, SizeType slot);
-        void splitNode(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, unsigned pageNum, SizeType slot, const void * & pushUpKey);
+        char * putEntryOnPage(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, unsigned childPage = 0);
+        char * determinePos(char *pagePtr, const Attribute &attr, const void *key, const RID &rid, char *endPtr, bool isLeaf, int typeOfSearch);
+        void shiftEntriesRight(char *oldLoc, char *newLoc, SizeType bytesToShift);
+        void shiftEntriesLeft(char *oldLoc, char *newLoc, SizeType bytesToShift);
+        void splitLeaf(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, char *insertPos);
+        void splitNode(IXFileHandle &fh, char *leftPage, char *rightPage, const Attribute &attr, const void *key, const RID &rid, unsigned pageNum, char *insertPos, void *pushUpKey);
         RC getLeafPage(IXFileHandle &fh, char *pageData, unsigned &pageNum, const Attribute &attr, const void *key, const RID &rid);
-        RC deleteEntryFromOnlyRootIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid);
-        RC deleteEntryFromIndex(IXFileHandle &fh, const Attribute &attr, const void *key, const RID &rid);
         RC printSubtree(unsigned pageNum, int indents, IXFileHandle &fh, const Attribute &attr, std::ostream &out) const;
-        void printPageKeys(char *pagePtr, bool isLeafPage, SizeType slotCount, const Attribute &attr, std::ostream &out) const;
+        void printPageKeys(char * const pagePtr, bool isLeafPage, char * const endPos, const Attribute &attr, std::ostream &out) const;
         RC visitInsertNode(IXFileHandle &fh, char *pageData, unsigned pageNum, const Attribute &attr, const void *key, const RID &rid, bool & needSplit, void *pushUpKey, RID &pushUpRID, unsigned &childPage);
         RC createNewRoot(IXFileHandle &fh, char *rootPage, char *rootPtr, const Attribute &attr, const void *rootKey, const RID &rootRID, unsigned childPage);
     };
@@ -104,12 +101,10 @@ namespace PeterDB {
         bool lowKeyInclusive;
         bool highKeyInclusive;
         char currPage[PAGE_SIZE];
-        char *currPageKeys;
-        SizeType currSlot;
-        SizeType currSlotCount;
+        char *currPos;
+        char *endPos;
         unsigned nextPageNum;
         bool firstScan;
-        SizeType keyEntrySize;
 
         // 0 for accepted key, 1 for rejected key, 2 for no more possible acceptable keys (IX_EOF)
         int acceptKey(RID &rid, void *key);
@@ -134,15 +129,11 @@ namespace PeterDB {
 
     class IXFileHandle : public FileHandle {
     public:
-        SizeType indexMaxPageNodes;
-
         // Constructor
         IXFileHandle();
 
         // Destructor
         ~IXFileHandle();
-
-        RC initFileHandle(const std::string &fileName);
     };
 
 }// namespace PeterDB

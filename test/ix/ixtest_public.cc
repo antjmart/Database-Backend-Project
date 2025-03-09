@@ -1375,7 +1375,7 @@ namespace PeterDBTesting {
         ASSERT_EQ(ix.printBTree(ixFileHandle, empNameAttr, stream), success)
                                     << "indexManager::printBTree() should succeed";
 
-        validateTree(stream, 13, 13, 2, 1);
+        validateTree(stream, 13, 13, 2, 2);
 
         // delete the 2nd entry
         prepareKeyAndRid(2, key, rid, empNameAttr.length);
@@ -1388,7 +1388,7 @@ namespace PeterDBTesting {
         ASSERT_EQ(ix.printBTree(ixFileHandle, empNameAttr, stream), success)
                                     << "indexManager::printBTree() should succeed";
 
-        validateTree(stream, 12, 12, 1, 1);
+        validateTree(stream, 12, 12, 1, 2);
 
     }
 
