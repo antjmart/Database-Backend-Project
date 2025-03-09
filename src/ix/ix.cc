@@ -224,7 +224,7 @@ namespace PeterDB {
             }
         }
 
-        if (insertPos == nullptr) ptrs[1] = putEntryOnPage(ptrs[1], attr, key, rid, pageNum);
+        if (insertPos != nullptr) ptrs[1] = putEntryOnPage(ptrs[1], attr, key, rid, pageNum);
         *reinterpret_cast<SizeType *>(newLeft + LEAF_CHECK_BYTE) = ptrs[0] - newLeft;
         *reinterpret_cast<SizeType *>(rightPage + LEAF_CHECK_BYTE) = ptrs[1] - rightPage;
         memmove(leftPage, newLeft, PAGE_SIZE);
@@ -294,12 +294,12 @@ namespace PeterDB {
                     memmove(&nextVisit, pos + (attr.length + RID_BYTES), PAGE_NUM_BYTES);
             }
 
-            char visitPage[PAGE_SIZE];
-            if (fh.readPage(nextVisit, visitPage) == -1) return -1;
-            if (visitInsertNode(fh, visitPage, nextVisit, attr, key, rid, needSplit, pushUpKey, pushUpRID, childPage) == -1) return -1;
-            if (!needSplit) return 0;
+            char *visitPage = new char[PAGE_SIZE];
+            if (fh.readPage(nextVisit, visitPage) == -1) {delete[] visitPage; return -1;}
+            if (visitInsertNode(fh, visitPage, nextVisit, attr, key, rid, needSplit, pushUpKey, pushUpRID, childPage) == -1) {delete[] visitPage; return -1;}
+            if (!needSplit) {delete[] visitPage; return 0;}
 
-            char newPage[PAGE_SIZE];
+            char *newPage = new char[PAGE_SIZE];
             bool leafVisited = *reinterpret_cast<unsigned char *>(visitPage) == 1;
             char *visitEnd = visitPage + *reinterpret_cast<SizeType *>(visitPage + (leafVisited ? (LEAF_CHECK_BYTE + PAGE_NUM_BYTES) : LEAF_CHECK_BYTE));
             char *visitInsert = determinePos(visitPage + (leafVisited ? LEAF_BYTES_BEFORE_KEYS : NODE_BYTES_BEFORE_KEYS), attr, pushUpKey, pushUpRID, visitEnd, leafVisited, 2);
@@ -321,7 +321,7 @@ namespace PeterDB {
                     putEntryOnPage(insertPos, attr, splitKey, r, fh.pageCount);
                     *reinterpret_cast<SizeType *>(pageData + LEAF_CHECK_BYTE) = (endPos + entrySize) - pageData;
                     needSplit = false;
-                    if (fh.writePage(pageNum, pageData) == -1) return -1;
+                    if (fh.writePage(pageNum, pageData) == -1) {delete[] visitPage; delete[] newPage; return -1;}
                 } else {
                     needSplit = true;
                     memmove(pushUpKey, splitKey, ptr - splitKey);
@@ -350,7 +350,7 @@ namespace PeterDB {
                     putEntryOnPage(insertPos, attr, splitKey, r, fh.pageCount);
                     *reinterpret_cast<SizeType *>(pageData + LEAF_CHECK_BYTE) = (endPos + entrySize) - pageData;
                     needSplit = false;
-                    if (fh.writePage(pageNum, pageData) == -1) return -1;
+                    if (fh.writePage(pageNum, pageData) == -1) {delete[] visitPage; delete[] newPage; return -1;}
                 } else {
                     needSplit = true;
                     memmove(pushUpKey, splitKey, ptr - splitKey);
@@ -360,8 +360,11 @@ namespace PeterDB {
                 }
             }
 
-            if (fh.writePage(nextVisit, visitPage) == -1) return -1;
-            return fh.appendPage(newPage);
+            if (fh.writePage(nextVisit, visitPage) == -1) {delete[] visitPage; delete[] newPage; return -1;}
+            RC status = fh.appendPage(newPage);
+            delete[] visitPage;
+            delete[] newPage;
+            return status;
         }
     }
 
@@ -416,19 +419,23 @@ namespace PeterDB {
         if (ixFileHandle.pageCount == 0)
             return insertEntryIntoEmptyIndex(ixFileHandle, attribute, key, rid);
 
-        char rootPtr[PAGE_SIZE];
-        if (ixFileHandle.readPage(0, rootPtr) == -1) return -1;
-        char rootPage[PAGE_SIZE];
+        char *rootPtr = new char[PAGE_SIZE];
+        if (ixFileHandle.readPage(0, rootPtr) == -1) {delete[] rootPtr; return -1;}
+        char *rootPage = new char[PAGE_SIZE];
         unsigned rootPageNum = *reinterpret_cast<unsigned *>(rootPtr);
-        if (ixFileHandle.readPage(rootPageNum, rootPage) == -1) return -1;
+        if (ixFileHandle.readPage(rootPageNum, rootPage) == -1) {delete[] rootPtr; delete[] rootPage; return -1;}
 
         RID pushUpRID{};
         unsigned childPage;
         bool needSplit;
         char pushUpKey[attribute.length + INT_BYTES + RID_BYTES + PAGE_NUM_BYTES];
-        if (visitInsertNode(ixFileHandle, rootPage, rootPageNum, attribute, key, rid, needSplit, pushUpKey, pushUpRID, childPage) == -1) return -1;
-        if (!needSplit) return 0;
-        return createNewRoot(ixFileHandle, rootPage, rootPtr, attribute, pushUpKey, pushUpRID, childPage);
+        if (visitInsertNode(ixFileHandle, rootPage, rootPageNum, attribute, key, rid, needSplit, pushUpKey, pushUpRID, childPage) == -1) {delete[] rootPtr; delete[] rootPage; return -1;}
+        if (!needSplit) {delete[] rootPtr; delete[] rootPage; return 0;}
+
+        RC status = createNewRoot(ixFileHandle, rootPage, rootPtr, attribute, pushUpKey, pushUpRID, childPage);
+        delete[] rootPtr;
+        delete[] rootPage;
+        return status;
     }
 
     void IndexManager::shiftEntriesLeft(char *oldLoc, char *newLoc, SizeType bytesToShift) {
