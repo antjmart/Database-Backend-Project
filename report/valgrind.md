@@ -52,3 +52,10 @@ RelationManager Tests Run with Valgrind Memcheck:
 Clean memory usage, no lost bytes or lost allocations. Some warnings
 about mixing use of new and free operators in the provided testing library
 files, but nothing that my code has any impact on.
+
+IndexManager Tests Run with Valgrind Memcheck:
+
+![img_4.png](img_4.png)
+
+Clean memory usage, no errors or leaks. Some warnings coming from provided files,
+but nothing that is sourced from my own written code.

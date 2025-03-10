@@ -13,16 +13,21 @@
 ### 2. Meta-data page in an index file
 - Show your meta-data page of an index design if you have any. 
 
-
+I simply have one page that stores the page number of the root node, but all other
+metadata is stored on individual nodes.
 
 ### 3. Index Entry Format
 - Show your index entry design (structure). 
 
-  - entries on internal nodes:  
+  - entries on internal nodes:
+  
+  Before the rest of key entries, I have 4 byte page number for pointer to the left most child.
+  General format for an entry:
+    key value -> record id -> 4 byte page number for pointer to the right of key value
   
   - entries on leaf nodes:
 
-
+  key value -> record id
 
 ### 4. Page Format
 - Show your internal-page (non-leaf node) design.
@@ -65,7 +70,7 @@ both key and RID.
 - Have you added your own module or source file (.cc or .h)? 
   Clearly list the changes on files and CMakeLists.txt, if any.
 
-
+No changes to files or cmake lists.
 
 - Other implementation details:
 
