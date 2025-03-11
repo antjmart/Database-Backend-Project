@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_set>
 #include "src/include/rbfm.h"
+#include "src/include/ix.h"
 
 struct tupleVal {
     int intVal;
