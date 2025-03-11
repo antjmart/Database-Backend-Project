@@ -32,7 +32,7 @@ namespace PeterDB {
 
         indicesDescriptor.push_back(Attribute{"table-id", TypeInt, 4});
         indicesDescriptor.push_back(Attribute{"attribute-name", TypeVarChar, 50});
-        indicesDescriptor.push_back(Attribute{"file-name", TypeVarChar, 50});
+        indicesDescriptor.push_back(Attribute{"file-name", TypeVarChar, 105});
 
         columnsColumns.emplace_back("table-id");
         columnsColumns.emplace_back("column-name");
@@ -69,7 +69,7 @@ namespace PeterDB {
     RC RelationManager::addTablesEntry(FileHandle &fh, int table_id, int tableNameLen, const char *tableName, int fileNameLen, const char *fileName, int isSystem, char *data) {
         std::vector<tupleVal> values{tupleVal{table_id}, tupleVal{tableNameLen}, tupleVal{tableName}, tupleVal{fileNameLen}, tupleVal{fileName}, tupleVal{isSystem}};
         craftTupleData(data + 1, values);
-        RID rid;
+        RID rid{};
         return RecordBasedFileManager::instance().insertRecord(fh, tablesDescriptor, data, rid);
     }
 
@@ -90,7 +90,7 @@ namespace PeterDB {
     RC RelationManager::addColumnsEntry(FileHandle &fh, int table_id, int nameLen, const char *name, AttrType columnType, int columnLen, int pos, char *data) {
         std::vector<tupleVal> values{tupleVal{table_id}, tupleVal{nameLen}, tupleVal{name}, tupleVal{columnType}, tupleVal{columnLen}, tupleVal{pos}};
         craftTupleData(data + 1, values);
-        RID rid;
+        RID rid{};
         return RecordBasedFileManager::instance().insertRecord(fh, columnsDescriptor, data, rid);
     }
 
@@ -114,14 +114,14 @@ namespace PeterDB {
         if (addColumnsEntry(fh, 3, 6, "fields", TypeVarChar, 100, 3, data) == -1) return -1;
         if (addColumnsEntry(fh, 4, 8, "table-id", TypeInt, 4, 1, data) == -1) return -1;
         if (addColumnsEntry(fh, 4, 14, "attribute-name", TypeVarChar, 50, 2, data) == -1) return -1;
-        if (addColumnsEntry(fh, 4, 9, "file-name", TypeVarChar, 50, 3, data) == -1) return -1;
+        if (addColumnsEntry(fh, 4, 9, "file-name", TypeVarChar, 105, 3, data) == -1) return -1;
         return rbfm.closeFile(fh);
     }
 
     RC RelationManager::addSchemasEntry(FileHandle &fh, int table_id, int version, int fieldCount, const char *fields, char *data) {
         std::vector<tupleVal> values{tupleVal{table_id}, tupleVal{version}, tupleVal{fieldCount}, tupleVal{fields}};
         craftTupleData(data + 1, values);
-        RID rid;
+        RID rid{};
         return RecordBasedFileManager::instance().insertRecord(fh, schemasDescriptor, data, rid);
     }
 
@@ -203,7 +203,7 @@ namespace PeterDB {
         char value[tableName.size() + INT_BYTES];
         formatString(tableName, value);
         if (scan(tables, table_name_field, EQ_OP, value, neededAttributes, scanner) == -1) {scanner.close(); return -1;}
-        RID rid;
+        RID rid{};
         char data[15];
         if (scanner.getNextTuple(rid, data) == RM_EOF) {scanner.close(); return -1;}
         memmove(&tableID, data + 1, INT_BYTES);
@@ -228,8 +228,8 @@ namespace PeterDB {
         // retrieve the table id and remove corresponding record from Tables table
         if (getTableID(tableName, tableID, true, &isSystemTable) == -1) return -1;
         if (isSystemTable == 1) return -1;
-        RID rid;
-        char data[60];
+        RID rid{};
+        char data[120];
 
         // scan through the Columns table and delete all records associated to the table ID
         std::vector<std::string> requestedAttributes;
@@ -317,7 +317,7 @@ namespace PeterDB {
         RM_ScanIterator scanner;
         std::string columns{"Columns"};
         std::string columns_table_id{"table-id"};
-        RID rid;
+        RID rid{};
         char data[100];
 
         // now, scan through columns table searching for the table ID we now have
@@ -598,7 +598,7 @@ namespace PeterDB {
         int numFields = -1;
         int newestVersion = specificVersion ? version : 0;
         unsigned char fields[110];
-        RID rid;
+        RID rid{};
 
         while (scanner.getNextTuple(rid, data) != RM_EOF) {
             memmove(&version, data + 1, INT_BYTES);
@@ -657,7 +657,7 @@ namespace PeterDB {
         for (int newPos : currVersionPositions)
             newPositions[i++] = static_cast<char>(newPos);
         newPositions[i] = '\0';
-        char data[150];
+        char data[164];
         memset(data, 0, 1);
         if (addSchemasEntry(fh, tableID, currVersion + 1, currVersionPositions.size(), newPositions, data) == -1) {rbfm.closeFile(fh); return -1;}
         if (rbfm.closeFile(fh) == -1) return -1;
@@ -719,9 +719,27 @@ namespace PeterDB {
         return rbfm.closeFile(fh);
     }
 
+    RC RelationManager::addIndicesEntry(FileHandle &fh, int table_id, int attrNameLen, const char *attrName, int fileNameLen, const char *fileName, char *data) {
+        std::vector<tupleVal> values{tupleVal{table_id}, tupleVal{attrNameLen}, tupleVal{attrName}, tupleVal{fileNameLen}, tupleVal{fileName}};
+        craftTupleData(data + 1, values);
+        RID rid{};
+        return RecordBasedFileManager::instance().insertRecord(fh, indicesDescriptor, data, rid);
+    }
+
     // QE IX related
     RC RelationManager::createIndex(const std::string &tableName, const std::string &attributeName){
-        return -1;
+        std::string fileName = tableName + '_' + attributeName + ".idx";
+        if (IndexManager::instance().createFile(fileName) == -1) return -1;
+        FileHandle fh;
+        int tableID;
+        if (getTableID(tableName, tableID, false, nullptr) == -1) return -1;
+        if (RecordBasedFileManager::instance().openFile("Indices", fh) == -1) return -1;
+        char recoEntry[1 + INT_BYTES + INT_BYTES + attributeName.size() + INT_BYTES + fileName.size()];
+        memset(recoEntry, 0, 1);
+        if (addIndicesEntry(fh, tableID, attributeName.size(), attributeName.c_str(),
+                 fileName.size(), fileName.c_str(), recoEntry) == -1) return -1;
+        return RecordBasedFileManager::instance().closeFile(fh);
+        // todo: construct B+ tree on this new index file
     }
 
     RC RelationManager::destroyIndex(const std::string &tableName, const std::string &attributeName){
