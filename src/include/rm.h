@@ -132,6 +132,7 @@ namespace PeterDB {
         RC addTablesEntry(FileHandle &fh, int table_id, int tableNameLen, const char *tableName, int fileNameLen, const char *fileName, int isSystem, char *data);
         RC addColumnsEntry(FileHandle &fh, int table_id, int nameLen, const char *name, AttrType columnType, int columnLen, int pos, char *data);
         RC addSchemasEntry(FileHandle &fh, int table_id, int version, int fieldCount, const char *fields, char *data);
+        RC addIndicesEntry(FileHandle &fh, int table_id, int attrNameLen, const char *attrName, int fileNameLen, const char *fileName, char *data);
         RC getTableID(const std::string &tableName, int &tableID, bool deleteEntry, int *isSystemTable);
         void formatString(const std::string &str, char *value);
         RC getSchemaVersionInfo(const std::string &tableName, int &tableID, int &version, int &pos, std::unordered_map<std::string, int> &names, std::unordered_set<int> &positions);
