@@ -277,7 +277,7 @@ namespace PeterDB {
         // delete those records from Indices
         if (rbfm.openFile("Indices", fh) == -1) return -1;
         for (auto recoid : recordsToDelete) {
-            if (rbfm.deleteRecord(fh, schemasDescriptor, recoid) == -1) return -1;
+            if (rbfm.deleteRecord(fh, indicesDescriptor, recoid) == -1) return -1;
         }
         if (rbfm.closeFile(fh) == -1) return -1;
 
@@ -660,7 +660,36 @@ namespace PeterDB {
         char data[150];
         memset(data, 0, 1);
         if (addSchemasEntry(fh, tableID, currVersion + 1, currVersionPositions.size(), newPositions, data) == -1) {rbfm.closeFile(fh); return -1;}
-        return rbfm.closeFile(fh);
+        if (rbfm.closeFile(fh) == -1) return -1;
+
+        RM_ScanIterator scanner;
+        // scan through Indices to find all index file records related to the table losing an attribute, destroy the index files as we go
+        // deletion and destruction only happens for the one index record/file corresponding to the attribute
+        std::vector<std::string> requestedAttrs{"attribute-name", "file-name"};
+
+        if (scan("Indices", "table-id", EQ_OP, &tableID, requestedAttrs, scanner) == -1) {scanner.close(); return -1;}
+        RID rid{};
+        bool indexDeleted = false;
+        while (scanner.getNextTuple(rid, data) != RM_EOF) {
+            if (attributeName == std::string{data + (1 + INT_BYTES), *reinterpret_cast<unsigned *>(data + 1)}) {
+                if (IndexManager::instance().destroyFile(std::string{data + (1 + INT_BYTES + attributeName.size() + INT_BYTES),
+                                                         *reinterpret_cast<unsigned *>(data + (1 + INT_BYTES + attributeName.size()))}) == -1) {
+                    scanner.close();
+                    return -1;
+                }
+                indexDeleted = true;
+                break;
+            }
+        }
+        if (scanner.close() == -1) return -1;
+
+        if (indexDeleted) {
+            // delete the record from Indices
+            if (rbfm.openFile("Indices", fh) == -1) return -1;
+            if (rbfm.deleteRecord(fh, indicesDescriptor, rid) == -1) return -1;
+            if (rbfm.closeFile(fh) == -1) return -1;
+        }
+        return 0;
     }
 
     // Extra credit work
