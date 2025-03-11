@@ -225,10 +225,11 @@ namespace PeterDB {
         std::string schemas{"Schemas"};
         std::string table_id_str{"table-id"};
         int tableID, isSystemTable;
+        // retrieve the table id and remove corresponding record from Tables table
         if (getTableID(tableName, tableID, true, &isSystemTable) == -1) return -1;
         if (isSystemTable == 1) return -1;
         RID rid;
-        char data[10];
+        char data[60];
 
         // scan through the Columns table and delete all records associated to the table ID
         std::vector<std::string> requestedAttributes;
@@ -248,13 +249,33 @@ namespace PeterDB {
         }
         if (rbfm.closeFile(fh) == -1) return -1;
 
+        // scan through the Schemas table to find all schema version records related to this table
         if (scan(schemas, table_id_str, EQ_OP, &tableID, requestedAttributes, scanner) == -1) {scanner.close(); return -1;}
         recordsToDelete.clear();
         while (scanner.getNextTuple(rid, data) != RM_EOF)
             recordsToDelete.push_back(rid);
         if (scanner.close() == -1) return -1;
 
+        // delete those records from Schemas
         if (rbfm.openFile(schemas, fh) == -1) return -1;
+        for (auto recoid : recordsToDelete) {
+            if (rbfm.deleteRecord(fh, schemasDescriptor, recoid) == -1) return -1;
+        }
+        if (rbfm.closeFile(fh) == -1) return -1;
+
+        // scan through Indices to find all index file records related to the table to be deleted, destroy the index files as we go
+        requestedAttributes.emplace_back("file-name");
+        if (scan("Indices", table_id_str, EQ_OP, &tableID, requestedAttributes, scanner) == -1) {scanner.close(); return -1;}
+        recordsToDelete.clear();
+        while (scanner.getNextTuple(rid, data) != RM_EOF) {
+            recordsToDelete.push_back(rid);
+            if (IndexManager::instance().destroyFile(std::string{data + (1 + INT_BYTES + INT_BYTES),
+                                                     *reinterpret_cast<unsigned *>(data + (1 + INT_BYTES))}) == -1) return -1;
+        }
+        if (scanner.close() == -1) return -1;
+
+        // delete those records from Indices
+        if (rbfm.openFile("Indices", fh) == -1) return -1;
         for (auto recoid : recordsToDelete) {
             if (rbfm.deleteRecord(fh, schemasDescriptor, recoid) == -1) return -1;
         }
@@ -265,10 +286,11 @@ namespace PeterDB {
 
     RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable, int *version, std::unordered_map<std::string, int> *attrPositions) {
         attrs = std::vector<Attribute>{};
-        if (tableName == "Tables" || tableName == "Columns" || tableName == "Schemas") {
+        if (tableName == "Tables" || tableName == "Columns" || tableName == "Schemas" || tableName == "Indices") {
             if (tableName == "Tables") attrs = tablesDescriptor;
             else if (tableName == "Columns") attrs = columnsDescriptor;
             else if (tableName == "Schemas") attrs = schemasDescriptor;
+            else if (tableName == "Indices") attrs = indicesDescriptor;
 
             if (attrPositions) {
                 attrPositions->clear();
