@@ -11,27 +11,27 @@
 namespace PeterDB {
 
 #define QE_EOF (-1)  // end of the index scan
-    typedef enum AggregateOp {
+    enum AggregateOp {
         MIN = 0, MAX, COUNT, SUM, AVG
-    } AggregateOp;
+    };
 
     // The following functions use the following
     // format for the passed data.
     //    For INT and REAL: use 4 bytes
     //    For VARCHAR: use 4 bytes for the length followed by the characters
 
-    typedef struct Value {
+    struct Value {
         AttrType type;          // type of value
         void *data;             // value
-    } Value;
+    };
 
-    typedef struct Condition {
+    struct Condition {
         std::string lhsAttr;        // left-hand side attribute
         CompOp op;                  // comparison operator
         bool bRhsIsAttr;            // TRUE if right-hand side is an attribute and not a value; FALSE, otherwise.
         std::string rhsAttr;        // right-hand side attribute if bRhsIsAttr = TRUE
         Value rhsValue;             // right-hand side value if bRhsIsAttr = FALSE
-    } Condition;
+    };
 
     class Iterator {
         // All the relational operators and access methods are iterators.
@@ -71,17 +71,17 @@ namespace PeterDB {
 
             // Set alias
             if (alias) this->tableName = alias;
-        };
+        }
 
         // Start a new iterator given the new compOp and value
         void setIterator() {
             iter.close();
             rm.scan(tableName, "", NO_OP, NULL, attrNames, iter);
-        };
+        }
 
         RC getNextTuple(void *data) override {
             return iter.getNextTuple(rid, data);
-        };
+        }
 
         RC getAttributes(std::vector<Attribute> &attributes) const override {
             attributes.clear();
@@ -92,11 +92,11 @@ namespace PeterDB {
                 attribute.name = tableName + "." + attribute.name;
             }
             return 0;
-        };
+        }
 
         ~TableScan() override {
             iter.close();
-        };
+        }
     };
 
     class IndexScan : public Iterator {
@@ -124,13 +124,13 @@ namespace PeterDB {
 
             // Set alias
             if (alias) this->tableName = alias;
-        };
+        }
 
         // Start a new iterator given the new key range
         void setIterator(void *lowKey, void *highKey, bool lowKeyInclusive, bool highKeyInclusive) {
             iter.close();
             rm.indexScan(tableName, attrName, lowKey, highKey, lowKeyInclusive, highKeyInclusive, iter);
-        };
+        }
 
         RC getNextTuple(void *data) override {
             RC rc = iter.getNextEntry(rid, key);
@@ -138,7 +138,7 @@ namespace PeterDB {
                 rc = rm.readTuple(tableName, rid, data);
             }
             return rc;
-        };
+        }
 
         RC getAttributes(std::vector<Attribute> &attributes) const override {
             attributes.clear();
@@ -149,11 +149,12 @@ namespace PeterDB {
             for (Attribute &attribute : attributes) {
                 attribute.name = tableName + "." + attribute.name;
             }
-        };
+            return 0;
+        }
 
         ~IndexScan() override {
             iter.close();
-        };
+        }
     };
 
     class Filter : public Iterator {
