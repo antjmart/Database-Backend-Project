@@ -60,6 +60,7 @@ namespace PeterDB {
         std::vector<Attribute> tablesDescriptor;
         std::vector<Attribute> columnsDescriptor;
         std::vector<Attribute> schemasDescriptor;
+        std::vector<Attribute> indicesDescriptor;
         std::vector<std::string> columnsColumns;
         int nextTableID;
         friend class RM_ScanIterator;
