@@ -19,14 +19,21 @@ namespace PeterDB {
         tablesDescriptor.push_back(Attribute{"table-name", TypeVarChar, 50});
         tablesDescriptor.push_back(Attribute{"file-name", TypeVarChar, 50});
         tablesDescriptor.push_back(Attribute{"is-system-table", TypeInt, 4});
+
         columnsDescriptor.push_back(Attribute{"table-id", TypeInt, 4});
         columnsDescriptor.push_back(Attribute{"column-name", TypeVarChar, 50});
         columnsDescriptor.push_back(Attribute{"column-type", TypeInt, 4});
         columnsDescriptor.push_back(Attribute{"column-length", TypeInt, 4});
         columnsDescriptor.push_back(Attribute{"column-position", TypeInt, 4});
+
         schemasDescriptor.push_back(Attribute{"table-id", TypeInt, 4});
         schemasDescriptor.push_back(Attribute{"version", TypeInt, 4});
         schemasDescriptor.push_back(Attribute{"fields", TypeVarChar, 100});
+
+        indicesDescriptor.push_back(Attribute{"table-id", TypeInt, 4});
+        indicesDescriptor.push_back(Attribute{"attribute-name", TypeVarChar, 50});
+        indicesDescriptor.push_back(Attribute{"file-name", TypeVarChar, 50});
+
         columnsColumns.emplace_back("table-id");
         columnsColumns.emplace_back("column-name");
         columnsColumns.emplace_back("column-type");
@@ -75,6 +82,7 @@ namespace PeterDB {
         if (addTablesEntry(fh, 1, 6, "Tables", 6, "Tables", 1, data) == -1) return -1;
         if (addTablesEntry(fh, 2, 7, "Columns", 7, "Columns", 1, data) == -1) return -1;
         if (addTablesEntry(fh, 3, 7, "Schemas", 7, "Schemas", 1, data) == -1) return -1;
+        if (addTablesEntry(fh, 4, 7, "Indices", 7, "Indices", 1, data) == -1) return -1;
 
         return rbfm.closeFile(fh);
     }
@@ -100,10 +108,13 @@ namespace PeterDB {
         if (addColumnsEntry(fh, 2, 11, "column-type", TypeInt, 4, 3, data) == -1) return -1;
         if (addColumnsEntry(fh, 2, 13, "column-length", TypeInt, 4, 4, data) == -1) return -1;
         if (addColumnsEntry(fh, 2, 15, "column-position", TypeInt, 4, 5, data) == -1) return -1;
+        if (addColumnsEntry(fh, 1, 15, "is-system-table", TypeInt, 4, 4, data) == -1) return -1;
         if (addColumnsEntry(fh, 3, 8, "table-id", TypeInt, 4, 1, data) == -1) return -1;
         if (addColumnsEntry(fh, 3, 7, "version", TypeInt, 4, 2, data) == -1) return -1;
         if (addColumnsEntry(fh, 3, 6, "fields", TypeVarChar, 100, 3, data) == -1) return -1;
-
+        if (addColumnsEntry(fh, 4, 8, "table-id", TypeInt, 4, 1, data) == -1) return -1;
+        if (addColumnsEntry(fh, 4, 14, "attribute-name", TypeVarChar, 50, 2, data) == -1) return -1;
+        if (addColumnsEntry(fh, 4, 9, "file-name", TypeVarChar, 50, 3, data) == -1) return -1;
         return rbfm.closeFile(fh);
     }
 
@@ -126,8 +137,9 @@ namespace PeterDB {
         if (rbfm.createFile("Tables") == -1) return -1;
         if (rbfm.createFile("Columns") == -1) return -1;
         if (rbfm.createFile("Schemas") == -1) return -1;
+        if (rbfm.createFile("Indices") == -1) return -1;
         FileHandle fh;
-        nextTableID = 4;  // reset table ID tracker every time catalog is made
+        nextTableID = 5;  // reset table ID tracker every time catalog is made
 
         if (initTablesTable(fh) == -1) return -1;
         return initColumnsTable(fh);
@@ -138,6 +150,7 @@ namespace PeterDB {
         if (RecordBasedFileManager::instance().destroyFile("Tables") == -1) status = -1;
         if (RecordBasedFileManager::instance().destroyFile("Columns") == -1) status = -1;
         if (RecordBasedFileManager::instance().destroyFile("Schemas") == -1) status = -1;
+        if (RecordBasedFileManager::instance().destroyFile("Indices") == -1) status = -1;
         return status;
     }
 
