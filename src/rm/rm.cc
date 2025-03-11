@@ -662,33 +662,7 @@ namespace PeterDB {
         if (addSchemasEntry(fh, tableID, currVersion + 1, currVersionPositions.size(), newPositions, data) == -1) {rbfm.closeFile(fh); return -1;}
         if (rbfm.closeFile(fh) == -1) return -1;
 
-        RM_ScanIterator scanner;
-        // scan through Indices to find all index file records related to the table losing an attribute, destroy the index files as we go
-        // deletion and destruction only happens for the one index record/file corresponding to the attribute
-        std::vector<std::string> requestedAttrs{"attribute-name", "file-name"};
-
-        if (scan("Indices", "table-id", EQ_OP, &tableID, requestedAttrs, scanner) == -1) {scanner.close(); return -1;}
-        RID rid{};
-        bool indexDeleted = false;
-        while (scanner.getNextTuple(rid, data) != RM_EOF) {
-            if (attributeName == std::string{data + (1 + INT_BYTES), *reinterpret_cast<unsigned *>(data + 1)}) {
-                if (IndexManager::instance().destroyFile(std::string{data + (1 + INT_BYTES + attributeName.size() + INT_BYTES),
-                                                         *reinterpret_cast<unsigned *>(data + (1 + INT_BYTES + attributeName.size()))}) == -1) {
-                    scanner.close();
-                    return -1;
-                }
-                indexDeleted = true;
-                break;
-            }
-        }
-        if (scanner.close() == -1) return -1;
-
-        if (indexDeleted) {
-            // delete the record from Indices
-            if (rbfm.openFile("Indices", fh) == -1) return -1;
-            if (rbfm.deleteRecord(fh, indicesDescriptor, rid) == -1) return -1;
-            if (rbfm.closeFile(fh) == -1) return -1;
-        }
+        destroyIndex(tableName, attributeName);
         return 0;
     }
 
@@ -739,11 +713,41 @@ namespace PeterDB {
         if (addIndicesEntry(fh, tableID, attributeName.size(), attributeName.c_str(),
                  fileName.size(), fileName.c_str(), recoEntry) == -1) return -1;
         return RecordBasedFileManager::instance().closeFile(fh);
-        // todo: construct B+ tree on this new index file
+        // to do: construct B+ tree on this new index file
     }
 
     RC RelationManager::destroyIndex(const std::string &tableName, const std::string &attributeName){
-        return -1;
+        RM_ScanIterator scanner;
+        int tableID;
+        if (getTableID(tableName, tableID, false, nullptr) == -1) return -1;
+        // scan through Indices to find all index file records related to the table
+        // deletion and destruction only happens for the one index record/file corresponding to the attribute
+        std::vector<std::string> requestedAttrs{"attribute-name", "file-name"};
+
+        if (scan("Indices", "table-id", EQ_OP, &tableID, requestedAttrs, scanner) == -1) {scanner.close(); return -1;}
+        RID rid{};
+        char data[164];
+        bool indexDeleted = false;
+        while (scanner.getNextTuple(rid, data) != RM_EOF) {
+            if (attributeName == std::string{data + (1 + INT_BYTES), *reinterpret_cast<unsigned *>(data + 1)}) {
+                if (IndexManager::instance().destroyFile(std::string{data + (1 + INT_BYTES + attributeName.size() + INT_BYTES),
+                                                         *reinterpret_cast<unsigned *>(data + (1 + INT_BYTES + attributeName.size()))}) == -1) {
+                    scanner.close();
+                    return -1;
+                }
+                indexDeleted = true;
+                break;
+            }
+        }
+        if (scanner.close() == -1) return -1;
+
+        if (!indexDeleted) return -1;
+        // delete the record from Indices
+        RecordBasedFileManager &rbfm = RecordBasedFileManager::instance();
+        FileHandle fh;
+        if (rbfm.openFile("Indices", fh) == -1) return -1;
+        if (rbfm.deleteRecord(fh, indicesDescriptor, rid) == -1) return -1;
+        return rbfm.closeFile(fh);
     }
 
     // indexScan returns an iterator to allow the caller to go through qualified entries in index
