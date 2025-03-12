@@ -348,17 +348,77 @@ namespace PeterDB {
         return scanner.close();
     }
 
+    RC RelationManager::getIndexFile(int tableID, const std::string &attrName, std::string &fileName) {
+        std::vector<std::string> requestedAttrs{"attribute-name", "file-name"};
+        RM_ScanIterator scanner;
+
+        if (scan("Indices", "table-id", EQ_OP, &tableID, requestedAttrs, scanner) == -1) {scanner.close(); return -1;}
+        RID rid{};
+        char data[164];
+        bool indexFound = false;
+        while (scanner.getNextTuple(rid, data) != RM_EOF) {
+            if (attrName == std::string{data + (1 + INT_BYTES), *reinterpret_cast<unsigned *>(data + 1)}) {
+                fileName = std::string{data + (1 + INT_BYTES + attrName.size() + INT_BYTES),
+                                       *reinterpret_cast<unsigned *>(data + (1 + INT_BYTES + attrName.size()))};
+                indexFound = true;
+                break;
+            }
+        }
+        if (scanner.close() == -1) return -1;
+        return indexFound ? 0 : -1;
+    }
+
+    RC RelationManager::updateIndexFiles(const std::string &tableName, const std::vector<Attribute> &attrs, const void *data, const RID &rid, bool isInsertion) {
+        int tableID;
+        if (getTableID(tableName, tableID, false, nullptr) == -1) return -1;
+        IXFileHandle iFh;
+        IndexManager & ix = IndexManager::instance();
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        std::string indexFileName;
+        SizeType numAttrs = attrs.size();
+        const char *dataPtr = static_cast<const char *>(data) + rbfm.nullBytesNeeded(numAttrs);
+        unsigned char nullByte;
+        int bitNum;
+        Attribute attr;
+
+        for (SizeType i = 0; i < numAttrs; ++i) {
+            if (i % BITS_PER_BYTE == 0)
+                memmove(&nullByte, static_cast<const char *>(data) + i / BITS_PER_BYTE, 1);
+            bitNum = i % BITS_PER_BYTE + 1;
+            if (rbfm.nullBitOn(nullByte, bitNum)) continue;
+
+            attr = attrs[i];
+            if (getIndexFile(tableID, attr.name, indexFileName) == 0) {
+                if (ix.openFile(indexFileName, iFh) == -1) return -1;
+                if (isInsertion) {
+                    if (ix.insertEntry(iFh, attr, dataPtr, rid) == -1) return -1;
+                } else {
+                    if (ix.deleteEntry(iFh, attr, dataPtr, rid) == -1) return -1;
+                }
+                if (ix.closeFile(iFh) == -1) return -1;
+            }
+
+            if (attr.type == TypeVarChar)
+                dataPtr += INT_BYTES + *reinterpret_cast<const int *>(dataPtr);
+            else
+                dataPtr += attr.length;
+        }
+        return 0;
+    }
+
     RC RelationManager::insertTuple(const std::string &tableName, const void *data, RID &rid) {
         std::vector<Attribute> recordDescriptor;
         int isSystemTable = 0, version = 0;
         if (getAttributes(tableName, recordDescriptor, &isSystemTable, &version) == -1) return -1;
         if (isSystemTable == 1) return -1;
+
         FileHandle fh;
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
         if (rbfm.openFile(tableName, fh) == -1) return -1;
-
         if (rbfm.insertRecord(fh, recordDescriptor, data, rid, version) == -1) {rbfm.closeFile(fh); return -1;}
-        return rbfm.closeFile(fh);
+        if (rbfm.closeFile(fh) == -1) return -1;
+
+        return updateIndexFiles(tableName, recordDescriptor, data, rid, true);
     }
 
     RC RelationManager::deleteTuple(const std::string &tableName, const RID &rid) {
@@ -366,12 +426,17 @@ namespace PeterDB {
         int isSystemTable = 0;
         if (getAttributes(tableName, recordDescriptor, &isSystemTable) == -1) return -1;
         if (isSystemTable == 1) return -1;
+
+        char data[PAGE_SIZE];
+        if (readTuple(tableName, rid, data) == -1) return -1;
+
         FileHandle fh;
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
         if (rbfm.openFile(tableName, fh) == -1) return -1;
-
         if (rbfm.deleteRecord(fh, recordDescriptor, rid) == -1) {rbfm.closeFile(fh); return -1;}
-        return rbfm.closeFile(fh);
+        if (rbfm.closeFile(fh) == -1) return -1;
+
+        return updateIndexFiles(tableName, recordDescriptor, data, rid, false);
     }
 
     RC RelationManager::updateTuple(const std::string &tableName, const void *data, const RID &rid) {
@@ -379,12 +444,18 @@ namespace PeterDB {
         int isSystemTable = 0, version = 0;
         if (getAttributes(tableName, recordDescriptor, &isSystemTable, &version) == -1) return -1;
         if (isSystemTable == 1) return -1;
+
+        char oldData[PAGE_SIZE];
+        if (readTuple(tableName, rid, oldData) == -1) return -1;
+
         FileHandle fh;
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
         if (rbfm.openFile(tableName, fh) == -1) return -1;
-
         if (rbfm.updateRecord(fh, recordDescriptor, data, rid, version) == -1) {rbfm.closeFile(fh); return -1;}
-        return rbfm.closeFile(fh);
+        if (rbfm.closeFile(fh) == -1) return -1;
+
+        if (updateIndexFiles(tableName, recordDescriptor, oldData, rid, false) == -1) return -1;
+        return updateIndexFiles(tableName, recordDescriptor, data, rid, true);
     }
 
     void RelationManager::convertDataToCurrSchema(void *data, const std::vector<Attribute> &currDescriptor, const std::vector<Attribute> &recordDescriptor,
