@@ -145,6 +145,7 @@ namespace PeterDB {
         void convertDataToCurrSchema(void *data, const std::vector<Attribute> &currDescriptor, const std::vector<Attribute> &recordDescriptor,
                                                       std::unordered_map<std::string, int> &currAttrPos, std::unordered_map<std::string, int> &recoVersionAttrPos);
         RC getIndexFile(int tableID, const std::string &attrName, std::string &fileName);
+        RC getIndexFiles(int tableID, std::unordered_map<std::string, std::string> &attrIndexFiles);
         RC updateIndexFiles(const std::string &tableName, const std::vector<Attribute> &attrs, const void *data, const RID &rid, bool isInsertion);
     };
 
