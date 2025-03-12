@@ -377,18 +377,38 @@ namespace PeterDB {
         return indexFound ? 0 : -1;
     }
 
+    RC RelationManager::getIndexFiles(int tableID, std::unordered_map<std::string, std::string> &attrIndexFiles) {
+        std::vector<std::string> requestedAttrs{"attribute-name", "file-name"};
+        RM_ScanIterator scanner;
+
+        if (scan("Indices", "table-id", EQ_OP, &tableID, requestedAttrs, scanner) == -1) {scanner.close(); return -1;}
+        RID rid{};
+        char data[164];
+        std::string attrName, fileName;
+
+        while (scanner.getNextTuple(rid, data) != RM_EOF) {
+            attrName = std::string{data + (1 + INT_BYTES), *reinterpret_cast<unsigned *>(data + 1)};
+            fileName = std::string{data + (1 + INT_BYTES + attrName.size() + INT_BYTES),
+                                       *reinterpret_cast<unsigned *>(data + (1 + INT_BYTES + attrName.size()))};
+            attrIndexFiles[attrName] = fileName;
+        }
+        return scanner.close();
+    }
+
     RC RelationManager::updateIndexFiles(const std::string &tableName, const std::vector<Attribute> &attrs, const void *data, const RID &rid, bool isInsertion) {
         int tableID;
         if (getTableID(tableName, tableID, false, nullptr) == -1) return -1;
         IXFileHandle iFh;
         IndexManager & ix = IndexManager::instance();
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
-        std::string indexFileName;
         SizeType numAttrs = attrs.size();
         const char *dataPtr = static_cast<const char *>(data) + rbfm.nullBytesNeeded(numAttrs);
         unsigned char nullByte;
         int bitNum;
         Attribute attr;
+
+        std::unordered_map<std::string, std::string> attrIndexFiles;
+        if (getIndexFiles(tableID, attrIndexFiles) == -1) return -1;
 
         for (SizeType i = 0; i < numAttrs; ++i) {
             if (i % BITS_PER_BYTE == 0)
@@ -397,8 +417,8 @@ namespace PeterDB {
             if (rbfm.nullBitOn(nullByte, bitNum)) continue;
 
             attr = attrs[i];
-            if (getIndexFile(tableID, attr.name, indexFileName) == 0) {
-                if (ix.openFile(indexFileName, iFh) == -1) return -1;
+            if (attrIndexFiles.find(attr.name) != attrIndexFiles.end()) {
+                if (ix.openFile(attrIndexFiles[attr.name], iFh) == -1) return -1;
                 if (isInsertion) {
                     if (ix.insertEntry(iFh, attr, dataPtr, rid) == -1) return -1;
                 } else {
