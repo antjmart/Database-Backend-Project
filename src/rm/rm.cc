@@ -866,7 +866,17 @@ namespace PeterDB {
                  bool lowKeyInclusive,
                  bool highKeyInclusive,
                  RM_IndexScanIterator &rm_IndexScanIterator){
-        return -1;
+        int tableID;
+        if (getTableID(tableName, tableID, false, nullptr) == -1) return -1;
+        std::string indexFileName;
+        if (getIndexFile(tableID, attributeName, indexFileName) == -1) return -1;
+        std::vector<Attribute> attrInfo;
+        if (getAttributes(tableName, attrInfo, nullptr, nullptr, nullptr, attributeName) == -1) return -1;
+
+        IXFileHandle *iFh = new IXFileHandle;
+        if (IndexManager::instance().openFile(indexFileName, *iFh) == -1) {delete iFh; return -1;}
+        rm_IndexScanIterator.init(iFh, attrInfo[0], lowKey, highKey, lowKeyInclusive, highKeyInclusive);
+        return 0;
     }
 
 
@@ -874,12 +884,22 @@ namespace PeterDB {
 
     RM_IndexScanIterator::~RM_IndexScanIterator() = default;
 
+    void RM_IndexScanIterator::init(IXFileHandle *iFh, const Attribute &attr, const void *lowKey, const void *highKey,
+                                    bool lowKeyInclusive, bool highKeyInclusive) {
+        this->iFh = iFh;
+        ixScanner.init(*iFh, attr, lowKey, highKey, lowKeyInclusive, highKeyInclusive);
+    }
+
     RC RM_IndexScanIterator::getNextEntry(RID &rid, void *key){
-        return -1;
+        return ixScanner.getNextEntry(rid, key);
     }
 
     RC RM_IndexScanIterator::close(){
-        return -1;
+        if (iFh != nullptr) {
+            delete iFh;
+            iFh = nullptr;
+        }
+        return ixScanner.close();
     }
 
 } // namespace PeterDB
