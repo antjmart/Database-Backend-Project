@@ -138,6 +138,8 @@ namespace PeterDB {
         RC getSchemaVersionInfo(const std::string &tableName, int &tableID, int &version, int &pos, std::unordered_map<std::string, int> &names, std::unordered_set<int> &positions);
         void convertDataToCurrSchema(void *data, const std::vector<Attribute> &currDescriptor, const std::vector<Attribute> &recordDescriptor,
                                                       std::unordered_map<std::string, int> &currAttrPos, std::unordered_map<std::string, int> &recoVersionAttrPos);
+        RC getIndexFile(int tableID, const std::string &attrName, std::string &fileName);
+        RC updateIndexFiles(const std::string &tableName, const std::vector<Attribute> &attrs, const void *data, const RID &rid, bool isInsertion);
     };
 
 } // namespace PeterDB
