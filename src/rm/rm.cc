@@ -284,7 +284,8 @@ namespace PeterDB {
         return RecordBasedFileManager::instance().destroyFile(tableName);
     }
 
-    RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable, int *version, std::unordered_map<std::string, int> *attrPositions) {
+    RC RelationManager::getAttributes(const std::string &tableName, std::vector<Attribute> &attrs, int *isSystemTable, int *version,
+                                      std::unordered_map<std::string, int> *attrPositions, const std::string &specificAttr) {
         attrs = std::vector<Attribute>{};
         if (tableName == "Tables" || tableName == "Columns" || tableName == "Schemas" || tableName == "Indices") {
             if (tableName == "Tables") attrs = tablesDescriptor;
@@ -338,10 +339,18 @@ namespace PeterDB {
             ptr += INT_BYTES;
             memmove(&attr.length, ptr, INT_BYTES);
             ptr += INT_BYTES;
-            int pos;
-            memmove(&pos, ptr, INT_BYTES);
-            if (positions.find(pos) != positions.end())
-                attrOrdering[pos] = attr;
+
+            if (specificAttr.empty()) {
+                int pos;
+                memmove(&pos, ptr, INT_BYTES);
+                if (positions.find(pos) != positions.end())
+                    attrOrdering[pos] = attr;
+            } else {
+                if (attr.name == specificAttr) {
+                    attrs.push_back(attr);
+                    break;
+                }
+            }
         }
         for (auto const & pair : attrOrdering)
             attrs.push_back(pair.second);
@@ -772,25 +781,53 @@ namespace PeterDB {
     }
 
     // QE IX related
-    RC RelationManager::createIndex(const std::string &tableName, const std::string &attributeName){
+    RC RelationManager::createIndex(const std::string &tableName, const std::string &attributeName) {
+        int tableID, isSystemTable;
+        if (getTableID(tableName, tableID, false, &isSystemTable) == -1) return -1;
+        if (isSystemTable == 1) return -1;
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        IndexManager & ix = IndexManager::instance();
+
         std::string fileName = tableName + '_' + attributeName + ".idx";
-        if (IndexManager::instance().createFile(fileName) == -1) return -1;
+        if (ix.createFile(fileName) == -1) return -1;
         FileHandle fh;
-        int tableID;
-        if (getTableID(tableName, tableID, false, nullptr) == -1) return -1;
-        if (RecordBasedFileManager::instance().openFile("Indices", fh) == -1) return -1;
+        if (rbfm.openFile("Indices", fh) == -1) return -1;
         char recoEntry[1 + INT_BYTES + INT_BYTES + attributeName.size() + INT_BYTES + fileName.size()];
         memset(recoEntry, 0, 1);
         if (addIndicesEntry(fh, tableID, attributeName.size(), attributeName.c_str(),
                  fileName.size(), fileName.c_str(), recoEntry) == -1) return -1;
-        return RecordBasedFileManager::instance().closeFile(fh);
-        // to do: construct B+ tree on this new index file
+        if (rbfm.closeFile(fh) == -1) return -1;
+
+        RM_ScanIterator scanner;
+        std::vector<std::string> requestedAttr;
+        requestedAttr.push_back(attributeName);
+        if (scan(tableName, "", NO_OP, nullptr, requestedAttr, scanner) == -1) return -1;
+        IXFileHandle iFh;
+        if (ix.openFile(fileName, iFh) == -1) return -1;
+
+        RID rid{};
+        std::vector<Attribute> attrInfo;
+        if (getAttributes(tableName, attrInfo, nullptr, nullptr, nullptr, attributeName) == -1) return -1;
+        Attribute attribute = attrInfo[0];
+
+        RC status = 0;
+        unsigned char key[attribute.length + INT_BYTES + 1];
+        while (scanner.getNextTuple(rid, key) != RM_EOF) {
+            if (key[0] == 0) {
+                if (ix.insertEntry(iFh, attribute, key + 1, rid) == -1) status = -1;
+            }
+        }
+
+        if (scanner.close() == -1) status = -1;
+        if (ix.closeFile(iFh) == -1) status = -1;
+        return status;
     }
 
     RC RelationManager::destroyIndex(const std::string &tableName, const std::string &attributeName){
         RM_ScanIterator scanner;
-        int tableID;
-        if (getTableID(tableName, tableID, false, nullptr) == -1) return -1;
+        int tableID, isSystemTable;
+        if (getTableID(tableName, tableID, false, &isSystemTable) == -1) return -1;
+        if (isSystemTable == 1) return -1;
         // scan through Indices to find all index file records related to the table
         // deletion and destruction only happens for the one index record/file corresponding to the attribute
         std::vector<std::string> requestedAttrs{"attribute-name", "file-name"};
