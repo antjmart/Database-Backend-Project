@@ -159,6 +159,10 @@ namespace PeterDB {
 
     class Filter : public Iterator {
         // Filter operator
+        Iterator & iter;
+        const Condition & cond;
+        std::vector<Attribute> attrs;
+
     public:
         Filter(Iterator *input,               // Iterator of input R
                const Condition &condition     // Selection condition
