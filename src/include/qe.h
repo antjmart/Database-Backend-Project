@@ -53,7 +53,8 @@ namespace PeterDB {
         std::vector<std::string> attrNames;
         RID rid;
     public:
-        TableScan(RelationManager &rm, const std::string &tableName, const char *alias = NULL) : rm(rm) {
+        TableScan(RelationManager &rm, const std::string &tableName, const char *alias = nullptr)
+            : rm(rm), rid() {
             //Set members
             this->tableName = tableName;
 
@@ -67,7 +68,7 @@ namespace PeterDB {
             }
 
             // Call RM scan to get an iterator
-            rm.scan(tableName, "", NO_OP, NULL, attrNames, iter);
+            rm.scan(tableName, "", NO_OP, nullptr, attrNames, iter);
 
             // Set alias
             if (alias) this->tableName = alias;
@@ -76,7 +77,7 @@ namespace PeterDB {
         // Start a new iterator given the new compOp and value
         void setIterator() {
             iter.close();
-            rm.scan(tableName, "", NO_OP, NULL, attrNames, iter);
+            rm.scan(tableName, "", NO_OP, nullptr, attrNames, iter);
         }
 
         RC getNextTuple(void *data) override {
@@ -111,7 +112,7 @@ namespace PeterDB {
         RID rid;
     public:
         IndexScan(RelationManager &rm, const std::string &tableName, const std::string &attrName,
-                  const char *alias = NULL) : rm(rm) {
+                  const char *alias = nullptr) : rm(rm), rid() {
             // Set members
             this->tableName = tableName;
             this->attrName = attrName;
@@ -120,7 +121,7 @@ namespace PeterDB {
             rm.getAttributes(tableName, attrs);
 
             // Call rm indexScan to get iterator
-            rm.indexScan(tableName, attrName, NULL, NULL, true, true, iter);
+            rm.indexScan(tableName, attrName, nullptr, nullptr, true, true, iter);
 
             // Set alias
             if (alias) this->tableName = alias;
@@ -143,7 +144,6 @@ namespace PeterDB {
         RC getAttributes(std::vector<Attribute> &attributes) const override {
             attributes.clear();
             attributes = this->attrs;
-
 
             // For attribute in std::vector<Attribute>, name it as rel.attr
             for (Attribute &attribute : attributes) {
