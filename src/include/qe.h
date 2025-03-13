@@ -163,6 +163,9 @@ namespace PeterDB {
         const Condition & cond;
         std::vector<Attribute> attrs;
 
+        bool validTuple(void *data, SizeType nullBytes);
+        bool compareValues(void *left, void *right, AttrType type);
+
     public:
         Filter(Iterator *input,               // Iterator of input R
                const Condition &condition     // Selection condition
