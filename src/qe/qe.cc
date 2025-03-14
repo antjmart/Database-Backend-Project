@@ -154,20 +154,19 @@ namespace PeterDB {
         return iter.getAttributes(attrs);
     }
 
-    Project::Project(Iterator *input, const std::vector<std::string> &attrNames) {
-
+    Project::Project(Iterator *input, const std::vector<std::string> &attrNames)
+        : iter(*input), projectedAttrs(attrNames.begin(), attrNames.end()) {
+        input->getAttributes(attrs);
     }
 
-    Project::~Project() {
-
-    }
+    Project::~Project() = default;
 
     RC Project::getNextTuple(void *data) {
         return -1;
     }
 
     RC Project::getAttributes(std::vector<Attribute> &attrs) const {
-        return -1;
+        return iter.getAttributes(attrs);
     }
 
     BNLJoin::BNLJoin(Iterator *leftIn, TableScan *rightIn, const Condition &condition, const unsigned int numPages) {
