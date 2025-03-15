@@ -285,20 +285,60 @@ namespace PeterDB {
     }
 
     Aggregate::Aggregate(Iterator *input, const Attribute &aggAttr, AggregateOp op)
-        : iter(*input), op(op) {
+        : iter(*input), groupIndex(-1), op(op) {
         input->getAttributes(attrs);
         aggIndex = 0;
         for (Attribute & attr : attrs) {
             if (attr.name == aggAttr.name) break;
             ++aggIndex;
         }
+        switch (op) {
+            case MIN:
+                minAggregation();
+                break;
+            case MAX:
+                maxAggregation();
+                break;
+            case COUNT:
+                countAggregation();
+                break;
+            case SUM:
+                sumAggregation();
+                break;
+            case AVG:
+                avgAggregation();
+        }
     }
 
     Aggregate::Aggregate(Iterator *input, const Attribute &aggAttr, const Attribute &groupAttr, AggregateOp op)
         : iter(*input), op(op) {
+        input->getAttributes(attrs);
+        for (int i = 0; i < attrs.size(); ++i) {
+            if (attrs[i].name == aggAttr.name) aggIndex = i;
+            if (attrs[i].name == groupAttr.name) groupIndex = i;
+        }
+        switch (op) {
+            case MIN:
+                minAggregation();
+                break;
+            case MAX:
+                maxAggregation();
+                break;
+            case COUNT:
+                countAggregation();
+                break;
+            case SUM:
+                sumAggregation();
+                break;
+            case AVG:
+                avgAggregation();
+        }
     }
 
-    Aggregate::~Aggregate() = default;
+    Aggregate::~Aggregate() {
+        for (const unsigned char *ptr : groupAggs)
+            delete[] ptr;
+    }
 
     RC Aggregate::nextVal(float *realVal, int *intVal) {
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
@@ -412,30 +452,15 @@ namespace PeterDB {
     }
 
     RC Aggregate::getNextTuple(void *data) {
-        if (hasAggregated) return QE_EOF;
-        memset(data, 0, 1);
-        switch (op) {
-            case MIN:
-                minAggregation(data);
-                break;
-            case MAX:
-                maxAggregation(data);
-                break;
-            case COUNT:
-                countAggregation(data);
-                break;
-            case SUM:
-                sumAggregation(data);
-                break;
-            case AVG:
-                avgAggregation(data);
-        }
-        hasAggregated = true;
+        if (groupAggsIndex >= groupAggs.size()) return QE_EOF;
+        const unsigned char *groupAgg = groupAggs[groupAggsIndex++];
+        memmove(data, groupAgg + sizeof(SizeType), *reinterpret_cast<const SizeType *>(groupAgg));
         return 0;
     }
 
     RC Aggregate::getAttributes(std::vector<Attribute> &attrs) const {
         attrs.clear();
+        if (groupIndex != -1) attrs.push_back(this->attrs[groupIndex]);
         Attribute attr = this->attrs[aggIndex];
         std::string opStr;
         switch (op) {
