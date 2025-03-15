@@ -253,9 +253,10 @@ namespace PeterDB {
         // Aggregation operator
         Iterator & iter;
         std::vector<Attribute> attrs;
-        unsigned aggIndex;
+        int aggIndex;
+        int groupIndex;
+        std::vector<const unsigned char *> groupAggs;
         AggregateOp op;
-        bool hasAggregated = false;
 
         void minAggregation(void *data);
         void maxAggregation(void *data);
