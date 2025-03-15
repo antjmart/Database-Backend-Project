@@ -151,22 +151,88 @@ namespace PeterDB {
     }
 
     RC Filter::getAttributes(std::vector<Attribute> &attrs) const {
-        return iter.getAttributes(attrs);
+        attrs.clear();
+        attrs = this->attrs;
+        return 0;
     }
 
     Project::Project(Iterator *input, const std::vector<std::string> &attrNames)
-        : iter(*input), projectedAttrs(attrNames.begin(), attrNames.end()) {
+        : iter(*input), projectAttrNames(attrNames.begin(), attrNames.end()) {
         input->getAttributes(attrs);
+        std::unordered_map<std::string, unsigned> attrToIndex;
+        attrToIndex.reserve(attrNames.size());
+        for (unsigned i = 0; i < attrs.size(); ++i) {
+            std::string & name = attrs[i].name;
+            if (projectAttrNames.find(name) != projectAttrNames.end())
+                attrToIndex[name] = i;
+        }
+
+        projectAttrs.reserve(attrNames.size());
+        for (const std::string & attrName : attrNames) {
+            projectAttrs.push_back(attrs[attrToIndex[attrName]]);
+        }
     }
 
     Project::~Project() = default;
 
     RC Project::getNextTuple(void *data) {
-        return -1;
+        if (iter.getNextTuple(data) == -1) return QE_EOF;
+
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        unsigned char nullByte;
+        int bitNum;
+        SizeType numAttrs = attrs.size();
+        unsigned char *dataPtr = static_cast<unsigned char *>(data) + rbfm.nullBytesNeeded(numAttrs);
+        Attribute & attr = attrs[0];
+        bool nullAttr;
+        std::unordered_map<std::string, unsigned char *> projectLocations;
+
+        for (SizeType i = 0; i < numAttrs; ++i) {
+            if (i % BITS_PER_BYTE == 0)
+                memmove(&nullByte, static_cast<const char *>(data) + i / BITS_PER_BYTE, 1);
+            bitNum = i % BITS_PER_BYTE + 1;
+            attr = attrs[i];
+            nullAttr = rbfm.nullBitOn(nullByte, bitNum);
+
+            if (projectAttrNames.find(attr.name) != projectAttrNames.end())
+                projectLocations[attr.name] = nullAttr ? nullptr : dataPtr;
+
+            if (!nullAttr) {
+                if (attr.type == TypeVarChar)
+                    dataPtr += INT_BYTES + *reinterpret_cast<const int *>(dataPtr);
+                else
+                    dataPtr += attr.length;
+            }
+        }
+
+        unsigned char projectedData[PAGE_SIZE];
+        unsigned char *projectPtr = projectedData + rbfm.nullBytesNeeded(projectAttrs.size());
+        memset(projectedData, 0, projectPtr - projectedData);
+        unsigned char *projectNullByte = projectedData;
+        int projectBitNum = 1;
+        SizeType bytesToCopy;
+
+        for (const Attribute & attribute : projectAttrs) {
+            dataPtr = projectLocations[attribute.name];
+            if (dataPtr == nullptr) {
+                *projectNullByte |= 1 << (BITS_PER_BYTE - projectBitNum);
+            } else {
+                bytesToCopy = attr.type == TypeVarChar ? INT_BYTES + *reinterpret_cast<const int *>(dataPtr) : attr.length;
+                memmove(projectPtr, dataPtr, bytesToCopy);
+                projectPtr += bytesToCopy;
+            }
+            projectBitNum = projectBitNum % BITS_PER_BYTE + 1;
+            if (projectBitNum == 1) ++projectNullByte;
+        }
+
+        memmove(data, projectedData, projectPtr - projectedData);
+        return 0;
     }
 
     RC Project::getAttributes(std::vector<Attribute> &attrs) const {
-        return iter.getAttributes(attrs);
+        attrs.clear();
+        attrs = projectAttrs;
+        return 0;
     }
 
     BNLJoin::BNLJoin(Iterator *leftIn, TableScan *rightIn, const Condition &condition, const unsigned int numPages) {
