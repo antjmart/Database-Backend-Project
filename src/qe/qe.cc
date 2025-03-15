@@ -321,7 +321,25 @@ namespace PeterDB {
     Aggregate::~Aggregate() = default;
 
     RC Aggregate::getNextTuple(void *data) {
-        return -1;
+        if (hasAggregated) return QE_EOF;
+        switch (op) {
+            case MIN:
+                minAggregation(data);
+                break;
+            case MAX:
+                maxAggregation(data);
+                break;
+            case COUNT:
+                countAggregation(data);
+                break;
+            case SUM:
+                sumAggregation(data);
+                break;
+            case AVG:
+                avgAggregation(data);
+        }
+        hasAggregated = true;
+        return 0;
     }
 
     RC Aggregate::getAttributes(std::vector<Attribute> &attrs) const {
