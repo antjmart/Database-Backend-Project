@@ -262,7 +262,7 @@ namespace PeterDB {
         void minMaxAggregation(bool isMin);
         void countAggregation();
         void sumAvgAggregation(bool isAvg);
-        RC nextVal(float *realVal, int *intVal);
+        RC nextVal(float *realVal, int *intVal, int *groupInt, float *groupReal, std::string *groupStr, AttrType attrType);
 
     public:
         // Mandatory
