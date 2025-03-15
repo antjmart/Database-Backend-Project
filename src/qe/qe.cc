@@ -283,23 +283,50 @@ namespace PeterDB {
         return -1;
     }
 
-    Aggregate::Aggregate(Iterator *input, const Attribute &aggAttr, AggregateOp op) {
+    Aggregate::Aggregate(Iterator *input, const Attribute &aggAttr, AggregateOp op)
+        : iter(*input), op(op) {
+        input->getAttributes(attrs);
+        aggIndex = 0;
+        for (Attribute & attr : attrs) {
+            if (attr.name == aggAttr.name) {
+                std::string opStr;
+                switch (op) {
+                    case MIN:
+                        opStr = "MIN";
+                        break;
+                    case MAX:
+                        opStr = "MAX";
+                        break;
+                    case COUNT:
+                        opStr = "COUNT";
+                        break;
+                    case SUM:
+                        opStr = "SUM";
+                        break;
+                    case AVG:
+                        opStr = "AVG";
+                }
 
+                attr.name = opStr + "(" + attr.name + ")";
+                break;
+            }
+            ++aggIndex;
+        }
     }
 
-    Aggregate::Aggregate(Iterator *input, const Attribute &aggAttr, const Attribute &groupAttr, AggregateOp op) {
-
+    Aggregate::Aggregate(Iterator *input, const Attribute &aggAttr, const Attribute &groupAttr, AggregateOp op)
+        : iter(*input), op(op) {
     }
 
-    Aggregate::~Aggregate() {
-
-    }
+    Aggregate::~Aggregate() = default;
 
     RC Aggregate::getNextTuple(void *data) {
         return -1;
     }
 
     RC Aggregate::getAttributes(std::vector<Attribute> &attrs) const {
-        return -1;
+        attrs.clear();
+        attrs.push_back(this->attrs[aggIndex]);
+        return 0;
     }
 } // namespace PeterDB
