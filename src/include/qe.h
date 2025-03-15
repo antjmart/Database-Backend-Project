@@ -262,6 +262,7 @@ namespace PeterDB {
         void countAggregation(void *data);
         void sumAggregation(void *data);
         void avgAggregation(void *data);
+        RC nextVal(float *realVal, int *intVal);
 
     public:
         // Mandatory
