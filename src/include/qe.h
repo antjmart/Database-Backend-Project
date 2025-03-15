@@ -256,6 +256,7 @@ namespace PeterDB {
         int aggIndex;
         int groupIndex;
         std::vector<const unsigned char *> groupAggs;
+        int groupAggsIndex = 0;
         AggregateOp op;
 
         void minAggregation(void *data);
