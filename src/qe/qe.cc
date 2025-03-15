@@ -341,39 +341,55 @@ namespace PeterDB {
             delete[] ptr;
     }
 
-    RC Aggregate::nextVal(float *realVal, int *intVal) {
+    RC Aggregate::nextVal(float *realVal, int *intVal, int *groupInt, float *groupReal, std::string *groupStr, AttrType attrType) {
         RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
         unsigned char nullByte;
         int bitNum;
         unsigned char data[PAGE_SIZE];
-        unsigned char *dataStart = static_cast<unsigned char *>(data) + rbfm.nullBytesNeeded(attrs.size());
-        unsigned char *dataPtr = dataStart;
+        unsigned numAttrs = attrs.size();
+        unsigned char *dataStart = static_cast<unsigned char *>(data) + rbfm.nullBytesNeeded(numAttrs);
+        unsigned char *dataPtr;
+        bool nullAttr, includeTuple;
 
         while (iter.getNextTuple(data) != QE_EOF) {
-            for (unsigned i = 0; i < aggIndex; ++i) {
+            dataPtr = dataStart;
+            includeTuple = true;
+
+            for (unsigned i = 0; i < numAttrs; ++i) {
                 if (i % BITS_PER_BYTE == 0)
                     memmove(&nullByte, data + i / BITS_PER_BYTE, 1);
                 bitNum = i % BITS_PER_BYTE + 1;
+                nullAttr = rbfm.nullBitOn(nullByte, bitNum);
 
-                if (!rbfm.nullBitOn(nullByte, bitNum)) {
+                if (i == aggIndex) {
+                    if (nullAttr) {includeTuple = false; break;}
+                    if (intVal != nullptr)
+                        memmove(intVal, dataPtr, INT_BYTES);
+                    else if (realVal != nullptr)
+                        memmove(realVal, dataPtr, INT_BYTES);
+                }
+                if (i == groupIndex) {
+                    if (nullAttr) {includeTuple = false; break;}
+                    switch (attrType) {
+                        case TypeInt:
+                            memmove(groupInt, dataPtr, INT_BYTES);
+                            break;
+                        case TypeReal:
+                            memmove(groupReal, dataPtr, INT_BYTES);
+                            break;
+                        case TypeVarChar:
+                            *groupStr = std::string{reinterpret_cast<char *>(dataPtr) + INT_BYTES, *reinterpret_cast<unsigned *>(dataPtr)};
+                    }
+                }
+
+                if (!nullAttr) {
                     if (attrs[i].type == TypeVarChar)
                         dataPtr += INT_BYTES + *reinterpret_cast<const int *>(dataPtr);
                     else
                         dataPtr += INT_BYTES;
                 }
             }
-
-            if (aggIndex % BITS_PER_BYTE == 0)
-                memmove(&nullByte, data + aggIndex / BITS_PER_BYTE, 1);
-            bitNum = aggIndex % BITS_PER_BYTE + 1;
-            if (!rbfm.nullBitOn(nullByte, bitNum)) {
-                if (intVal == nullptr)
-                    memmove(realVal, dataPtr, INT_BYTES);
-                else
-                    memmove(intVal, dataPtr, INT_BYTES);
-                return 0;
-            }
-            dataPtr = dataStart;
+            if (includeTuple) return 0;
         }
         return QE_EOF;
     }
@@ -387,13 +403,13 @@ namespace PeterDB {
             if (attrs[aggIndex].type == TypeInt) {
                 int limit = isMin ? std::numeric_limits<int>::max() : std::numeric_limits<int>::min();
                 int val;
-                while (nextVal(nullptr, &val, nullptr, nullptr, nullptr, 5) != QE_EOF)
+                while (nextVal(nullptr, &val, nullptr, nullptr, nullptr, TypeInt) != QE_EOF)
                     limit = isMin ? std::min(limit, val) : std::max(limit, val);
                 memmove(data + 1, &limit, INT_BYTES);
             } else {
                 float limit = isMin ? std::numeric_limits<float>::max() : std::numeric_limits<float>::min();
                 float val;
-                while (nextVal(&val, nullptr, nullptr, nullptr, nullptr, 5) != QE_EOF)
+                while (nextVal(&val, nullptr, nullptr, nullptr, nullptr, TypeInt) != QE_EOF)
                     limit = isMin ? std::min(limit, val) : std::max(limit, val);
                 memmove(data + 1, &limit, INT_BYTES);
             }
@@ -540,7 +556,7 @@ namespace PeterDB {
             unsigned char *data = start + OFFSET_BYTES;
             int count = 0;
             memset(data, 0, 1);
-            while (nextVal(nullptr, nullptr, nullptr, nullptr, nullptr, 5) != QE_EOF)
+            while (nextVal(nullptr, nullptr, nullptr, nullptr, nullptr, TypeInt) != QE_EOF)
                 ++count;
             memmove(data + 1, &count, INT_BYTES);
             groupAggs.push_back(start);
@@ -608,7 +624,7 @@ namespace PeterDB {
             if (attrs[aggIndex].type == TypeInt) {
                 int sum = 0;
                 int val;
-                while (nextVal(nullptr, &val, nullptr, nullptr, nullptr, 5) != QE_EOF) {
+                while (nextVal(nullptr, &val, nullptr, nullptr, nullptr, TypeInt) != QE_EOF) {
                     sum += val;
                     ++count;
                 }
@@ -621,7 +637,7 @@ namespace PeterDB {
             } else {
                 float sum = 0.0;
                 float val;
-                while (nextVal(&val, nullptr, nullptr, nullptr, nullptr, 5) != QE_EOF) {
+                while (nextVal(&val, nullptr, nullptr, nullptr, nullptr, TypeInt) != QE_EOF) {
                     sum += val;
                     ++count;
                 }
