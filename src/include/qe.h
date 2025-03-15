@@ -255,6 +255,13 @@ namespace PeterDB {
         std::vector<Attribute> attrs;
         unsigned aggIndex;
         AggregateOp op;
+        bool hasAggregated = false;
+
+        void minAggregation(void *data);
+        void maxAggregation(void *data);
+        void countAggregation(void *data);
+        void sumAggregation(void *data);
+        void avgAggregation(void *data);
 
     public:
         // Mandatory
