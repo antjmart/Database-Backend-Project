@@ -4,6 +4,7 @@
 
 constexpr PeterDB::SizeType BITS_PER_BYTE = 8;
 constexpr PeterDB::SizeType INT_BYTES = 4;
+constexpr PeterDB::SizeType OFFSET_BYTES = sizeof(PeterDB::SizeType);
 
 namespace PeterDB {
     Filter::Filter(Iterator *input, const Condition &condition)
@@ -294,19 +295,19 @@ namespace PeterDB {
         }
         switch (op) {
             case MIN:
-                minAggregation();
+                minMaxAggregation(true);
                 break;
             case MAX:
-                maxAggregation();
+                minMaxAggregation(false);
                 break;
             case COUNT:
                 countAggregation();
                 break;
             case SUM:
-                sumAggregation();
+                sumAvgAggregation(false);
                 break;
             case AVG:
-                avgAggregation();
+                sumAvgAggregation(true);
         }
     }
 
@@ -319,19 +320,19 @@ namespace PeterDB {
         }
         switch (op) {
             case MIN:
-                minAggregation();
+                minMaxAggregation(true);
                 break;
             case MAX:
-                maxAggregation();
+                minMaxAggregation(false);
                 break;
             case COUNT:
                 countAggregation();
                 break;
             case SUM:
-                sumAggregation();
+                sumAvgAggregation(false);
                 break;
             case AVG:
-                avgAggregation();
+                sumAvgAggregation(true);
         }
     }
 
@@ -377,84 +378,400 @@ namespace PeterDB {
         return QE_EOF;
     }
 
-    void Aggregate::minAggregation(void *data) {
-        if (attrs[aggIndex].type == TypeInt) {
-            int min = std::numeric_limits<int>::max();
-            int val;
-            while (nextVal(nullptr, &val) != QE_EOF)
-                min = std::min(min, val);
-            memmove(static_cast<char *>(data) + 1, &min, INT_BYTES);
-        } else {
-            float min = std::numeric_limits<float>::max();
-            float val;
-            while (nextVal(&val, nullptr) != QE_EOF)
-                min = std::min(min, val);
-            memmove(static_cast<char *>(data) + 1, &min, INT_BYTES);
-        }
-    }
-
-    void Aggregate::maxAggregation(void *data) {
-        if (attrs[aggIndex].type == TypeInt) {
-            int max = std::numeric_limits<int>::min();
-            int val;
-            while (nextVal(nullptr, &val) != QE_EOF)
-                max = std::max(max, val);
-            memmove(static_cast<char *>(data) + 1, &max, INT_BYTES);
-        } else {
-            float max = std::numeric_limits<float>::min();
-            float val;
-            while (nextVal(&val, nullptr) != QE_EOF)
-                max = std::max(max, val);
-            memmove(static_cast<char *>(data) + 1, &max, INT_BYTES);
-        }
-    }
-
-    void Aggregate::countAggregation(void *data) {
-        int count = 0, filler;
-        while (nextVal(nullptr, &filler) != QE_EOF)
-            ++count;
-        memmove(static_cast<char *>(data) + 1, &count, INT_BYTES);
-    }
-
-    void Aggregate::sumAggregation(void *data) {
-        if (attrs[aggIndex].type == TypeInt) {
-            int sum = 0, val;
-            while (nextVal(nullptr, &val) != QE_EOF)
-                sum += val;
-            memmove(static_cast<char *>(data) + 1, &sum, INT_BYTES);
-        } else {
-            float sum = 0, val;
-            while (nextVal(&val, nullptr) != QE_EOF)
-                sum += val;
-            memmove(static_cast<char *>(data) + 1, &sum, INT_BYTES);
-        }
-    }
-
-    void Aggregate::avgAggregation(void *data) {
-        float numVals = 0;
-        if (attrs[aggIndex].type == TypeInt) {
-            int sum = 0, val;
-            while (nextVal(nullptr, &val) != QE_EOF) {
-                sum += val;
-                ++numVals;
+    void Aggregate::minMaxAggregation(bool isMin) {
+        if (groupIndex == -1) {
+            unsigned char *start = new unsigned char[INT_BYTES + 1 + OFFSET_BYTES];
+            *reinterpret_cast<SizeType *>(start) = INT_BYTES + 1;
+            unsigned char *data = start + OFFSET_BYTES;
+            memset(data, 0, 1);
+            if (attrs[aggIndex].type == TypeInt) {
+                int limit = isMin ? std::numeric_limits<int>::max() : std::numeric_limits<int>::min();
+                int val;
+                while (nextVal(nullptr, &val, nullptr, nullptr, nullptr, 5) != QE_EOF)
+                    limit = isMin ? std::min(limit, val) : std::max(limit, val);
+                memmove(data + 1, &limit, INT_BYTES);
+            } else {
+                float limit = isMin ? std::numeric_limits<float>::max() : std::numeric_limits<float>::min();
+                float val;
+                while (nextVal(&val, nullptr, nullptr, nullptr, nullptr, 5) != QE_EOF)
+                    limit = isMin ? std::min(limit, val) : std::max(limit, val);
+                memmove(data + 1, &limit, INT_BYTES);
             }
-            float avg = sum / numVals;
-            memmove(static_cast<char *>(data) + 1, &avg, INT_BYTES);
-        } else {
-            float sum = 0, val;
-            while (nextVal(&val, nullptr) != QE_EOF) {
-                sum += val;
-                ++numVals;
+            groupAggs.push_back(start);
+            return;
+        }
+
+        switch (attrs[groupIndex].type) {
+            case TypeInt:
+                if (attrs[aggIndex].type == TypeInt) {
+                    int val, group;
+                    std::unordered_map<int, int> groupings;
+
+                    while (nextVal(nullptr, &val, &group, nullptr, nullptr, TypeInt) != QE_EOF) {
+                        if (groupings.find(group) != groupings.end())
+                            groupings[group] = isMin ? std::min(groupings[group], val) : std::max(groupings[group], val);
+                        else
+                            groupings[group] = val;
+                    }
+                    for (auto g : groupings) {
+                        unsigned char *start = new unsigned char[INT_BYTES + INT_BYTES + 1 + OFFSET_BYTES];
+                        *reinterpret_cast<SizeType *>(start) = INT_BYTES + INT_BYTES + 1;
+                        unsigned char *data = start + OFFSET_BYTES;
+                        memset(data, 0, 1);
+                        memmove(data + 1, &g.first, INT_BYTES);
+                        memmove(data + (1 + INT_BYTES), &g.second, INT_BYTES);
+                        groupAggs.push_back(start);
+                    }
+                } else {
+                    float val;
+                    int group;
+                    std::unordered_map<int, float> groupings;
+
+                    while (nextVal(&val, nullptr, &group, nullptr, nullptr, TypeInt) != QE_EOF) {
+                        if (groupings.find(group) != groupings.end())
+                            groupings[group] = isMin ? std::min(groupings[group], val) : std::max(groupings[group], val);
+                        else
+                            groupings[group] = val;
+                    }
+                    for (auto g : groupings) {
+                        unsigned char *start = new unsigned char[INT_BYTES + INT_BYTES + 1 + OFFSET_BYTES];
+                        *reinterpret_cast<SizeType *>(start) = INT_BYTES + INT_BYTES + 1;
+                        unsigned char *data = start + OFFSET_BYTES;
+                        memset(data, 0, 1);
+                        memmove(data + 1, &g.first, INT_BYTES);
+                        memmove(data + (1 + INT_BYTES), &g.second, INT_BYTES);
+                        groupAggs.push_back(start);
+                    }
+                }
+                break;
+            case TypeReal:
+                if (attrs[aggIndex].type == TypeInt) {
+                    int val;
+                    float group;
+                    std::unordered_map<float, int> groupings;
+
+                    while (nextVal(nullptr, &val, nullptr, &group, nullptr, TypeReal) != QE_EOF) {
+                        if (groupings.find(group) != groupings.end())
+                            groupings[group] = isMin ? std::min(groupings[group], val) : std::max(groupings[group], val);
+                        else
+                            groupings[group] = val;
+                    }
+                    for (auto g : groupings) {
+                        unsigned char *start = new unsigned char[INT_BYTES + INT_BYTES + 1 + OFFSET_BYTES];
+                        *reinterpret_cast<SizeType *>(start) = INT_BYTES + INT_BYTES + 1;
+                        unsigned char *data = start + OFFSET_BYTES;
+                        memset(data, 0, 1);
+                        memmove(data + 1, &g.first, INT_BYTES);
+                        memmove(data + (1 + INT_BYTES), &g.second, INT_BYTES);
+                        groupAggs.push_back(start);
+                    }
+                } else {
+                    float val, group;
+                    std::unordered_map<float, float> groupings;
+
+                    while (nextVal(&val, nullptr, nullptr, &group, nullptr, TypeReal) != QE_EOF) {
+                        if (groupings.find(group) != groupings.end())
+                            groupings[group] = isMin ? std::min(groupings[group], val) : std::max(groupings[group], val);
+                        else
+                            groupings[group] = val;
+                    }
+                    for (auto g : groupings) {
+                        unsigned char *start = new unsigned char[INT_BYTES + INT_BYTES + 1 + OFFSET_BYTES];
+                        *reinterpret_cast<SizeType *>(start) = INT_BYTES + INT_BYTES + 1;
+                        unsigned char *data = start + OFFSET_BYTES;
+                        memset(data, 0, 1);
+                        memmove(data + 1, &g.first, INT_BYTES);
+                        memmove(data + (1 + INT_BYTES), &g.second, INT_BYTES);
+                        groupAggs.push_back(start);
+                    }
+                }
+                break;
+            case TypeVarChar:
+                if (attrs[aggIndex].type == TypeInt) {
+                    int val;
+                    std::string group;
+                    std::unordered_map<std::string, int> groupings;
+
+                    while (nextVal(nullptr, &val, nullptr, nullptr, &group, TypeVarChar) != QE_EOF) {
+                        if (groupings.find(group) != groupings.end())
+                            groupings[group] = isMin ? std::min(groupings[group], val) : std::max(groupings[group], val);
+                        else
+                            groupings[group] = val;
+                    }
+                    for (auto g : groupings) {
+                        unsigned char *start = new unsigned char[1 + INT_BYTES + g.first.size() + INT_BYTES + OFFSET_BYTES];
+                        *reinterpret_cast<SizeType *>(start) = 1 + INT_BYTES + g.first.size() + INT_BYTES;
+                        unsigned char *data = start + OFFSET_BYTES;
+                        memset(data, 0, 1);
+                        *reinterpret_cast<unsigned *>(data + 1) = g.first.size();
+                        memmove(data + (1 + INT_BYTES), g.first.c_str(), g.first.size());
+                        memmove(data + (1 + INT_BYTES + g.first.size()), &g.second, INT_BYTES);
+                        groupAggs.push_back(start);
+                    }
+                } else {
+                    float val;
+                    std::string group;
+                    std::unordered_map<std::string, float> groupings;
+
+                    while (nextVal(&val, nullptr, nullptr, nullptr, &group, TypeVarChar) != QE_EOF) {
+                        if (groupings.find(group) != groupings.end())
+                            groupings[group] = isMin ? std::min(groupings[group], val) : std::max(groupings[group], val);
+                        else
+                            groupings[group] = val;
+                    }
+                    for (auto g : groupings) {
+                        unsigned char *start = new unsigned char[1 + INT_BYTES + g.first.size() + INT_BYTES + OFFSET_BYTES];
+                        *reinterpret_cast<SizeType *>(start) = 1 + INT_BYTES + g.first.size() + INT_BYTES;
+                        unsigned char *data = start + OFFSET_BYTES;
+                        memset(data, 0, 1);
+                        *reinterpret_cast<unsigned *>(data + 1) = g.first.size();
+                        memmove(data + (1 + INT_BYTES), g.first.c_str(), g.first.size());
+                        memmove(data + (1 + INT_BYTES + g.first.size()), &g.second, INT_BYTES);
+                        groupAggs.push_back(start);
+                    }
+                }
+        }
+    }
+
+    void Aggregate::countAggregation() {
+        if (groupIndex == -1) {
+            unsigned char *start = new unsigned char[INT_BYTES + 1 + OFFSET_BYTES];
+            *reinterpret_cast<SizeType *>(start) = 1 + INT_BYTES;
+            unsigned char *data = start + OFFSET_BYTES;
+            int count = 0;
+            memset(data, 0, 1);
+            while (nextVal(nullptr, nullptr, nullptr, nullptr, nullptr, 5) != QE_EOF)
+                ++count;
+            memmove(data + 1, &count, INT_BYTES);
+            groupAggs.push_back(start);
+            return;
+        }
+
+        switch (attrs[groupIndex].type) {
+            case TypeInt: {
+                int group;
+                std::unordered_map<int, int> groupings;
+
+                while (nextVal(nullptr, nullptr, &group, nullptr, nullptr, TypeInt) != QE_EOF) ++groupings[group];
+                for (auto g : groupings) {
+                    unsigned char *start = new unsigned char[INT_BYTES + INT_BYTES + 1 + OFFSET_BYTES];
+                    *reinterpret_cast<SizeType *>(start) = INT_BYTES + INT_BYTES + 1;
+                    unsigned char *data = start + OFFSET_BYTES;
+                    memset(data, 0, 1);
+                    memmove(data + 1, &g.first, INT_BYTES);
+                    memmove(data + (1 + INT_BYTES), &g.second, INT_BYTES);
+                    groupAggs.push_back(start);
+                }
+                break;
+            } case TypeReal: {
+                float group;
+                std::unordered_map<float, int> groupings;
+
+                while (nextVal(nullptr, nullptr, nullptr, &group, nullptr, TypeReal) != QE_EOF) ++groupings[group];
+                for (auto g : groupings) {
+                    unsigned char *start = new unsigned char[INT_BYTES + INT_BYTES + 1 + OFFSET_BYTES];
+                    *reinterpret_cast<SizeType *>(start) = INT_BYTES + INT_BYTES + 1;
+                    unsigned char *data = start + OFFSET_BYTES;
+                    memset(data, 0, 1);
+                    memmove(data + 1, &g.first, INT_BYTES);
+                    memmove(data + (1 + INT_BYTES), &g.second, INT_BYTES);
+                    groupAggs.push_back(start);
+                }
+                break;
+            } case TypeVarChar: {
+                std::string group;
+                std::unordered_map<std::string, int> groupings;
+
+                while (nextVal(nullptr, nullptr, nullptr, nullptr, &group, TypeVarChar) != QE_EOF) ++groupings[group];
+                for (auto g : groupings) {
+                    unsigned char *start = new unsigned char[1 + INT_BYTES + g.first.size() + INT_BYTES + OFFSET_BYTES];
+                    *reinterpret_cast<SizeType *>(start) = 1 + INT_BYTES + g.first.size() + INT_BYTES;
+                    unsigned char *data = start + OFFSET_BYTES;
+                    memset(data, 0, 1);
+                    *reinterpret_cast<unsigned *>(data + 1) = g.first.size();
+                    memmove(data + (1 + INT_BYTES), g.first.c_str(), g.first.size());
+                    memmove(data + (1 + INT_BYTES + g.first.size()), &g.second, INT_BYTES);
+                    groupAggs.push_back(start);
+                }
             }
-            float avg = sum / numVals;
-            memmove(static_cast<char *>(data) + 1, &avg, INT_BYTES);
+        }
+    }
+
+    void Aggregate::sumAvgAggregation(bool isAvg) {
+        if (groupIndex == -1) {
+            unsigned char *start = new unsigned char[INT_BYTES + 1 + OFFSET_BYTES];
+            *reinterpret_cast<SizeType *>(start) = 1 + INT_BYTES;
+            unsigned char *data = start + OFFSET_BYTES;
+            float count = 0.0;
+            memset(data, 0, 1);
+
+            if (attrs[aggIndex].type == TypeInt) {
+                int sum = 0;
+                int val;
+                while (nextVal(nullptr, &val, nullptr, nullptr, nullptr, 5) != QE_EOF) {
+                    sum += val;
+                    ++count;
+                }
+
+                if (isAvg) {
+                    float avg = sum / count;
+                    memmove(data + 1, &avg, INT_BYTES);
+                } else
+                    memmove(data + 1, &sum, INT_BYTES);
+            } else {
+                float sum = 0.0;
+                float val;
+                while (nextVal(&val, nullptr, nullptr, nullptr, nullptr, 5) != QE_EOF) {
+                    sum += val;
+                    ++count;
+                }
+                *reinterpret_cast<float *>(data + 1) = isAvg ? sum / count : sum;
+            }
+            groupAggs.push_back(start);
+            return;
+        }
+
+        switch (attrs[groupIndex].type) {
+            case TypeInt: {
+                std::unordered_map<int, float> groupCounts;
+                if (attrs[aggIndex].type == TypeInt) {
+                    int val, group;
+                    std::unordered_map<int, int> groupings;
+
+                    while (nextVal(nullptr, &val, &group, nullptr, nullptr, TypeInt) != QE_EOF) {
+                        groupings[group] += val;
+                        ++groupCounts[group];
+                    }
+                    for (auto g : groupings) {
+                        unsigned char *start = new unsigned char[INT_BYTES + INT_BYTES + 1 + OFFSET_BYTES];
+                        *reinterpret_cast<SizeType *>(start) = INT_BYTES + INT_BYTES + 1;
+                        unsigned char *data = start + OFFSET_BYTES;
+                        memset(data, 0, 1);
+                        memmove(data + 1, &g.first, INT_BYTES);
+                        if (isAvg) {
+                            float avg = g.second / groupCounts[g.first];
+                            memmove(data + (1 + INT_BYTES), &avg, INT_BYTES);
+                        } else
+                            memmove(data + (1 + INT_BYTES), &g.second, INT_BYTES);
+                        groupAggs.push_back(start);
+                    }
+                } else {
+                    float val;
+                    int group;
+                    std::unordered_map<int, float> groupings;
+
+                    while (nextVal(&val, nullptr, &group, nullptr, nullptr, TypeInt) != QE_EOF) {
+                        groupings[group] += val;
+                        ++groupCounts[group];
+                    }
+                    for (auto g : groupings) {
+                        unsigned char *start = new unsigned char[INT_BYTES + INT_BYTES + 1 + OFFSET_BYTES];
+                        *reinterpret_cast<SizeType *>(start) = INT_BYTES + INT_BYTES + 1;
+                        unsigned char *data = start + OFFSET_BYTES;
+                        memset(data, 0, 1);
+                        memmove(data + 1, &g.first, INT_BYTES);
+                        *reinterpret_cast<float *>(data + (1 + INT_BYTES)) = isAvg ? g.second / groupCounts[g.first] : g.second;
+                        groupAggs.push_back(start);
+                    }
+                }
+                break;
+            } case TypeReal: {
+                std::unordered_map<float, float> groupCounts;
+                if (attrs[aggIndex].type == TypeInt) {
+                    int val;
+                    float group;
+                    std::unordered_map<float, int> groupings;
+
+                    while (nextVal(nullptr, &val, nullptr, &group, nullptr, TypeReal) != QE_EOF) {
+                        groupings[group] += val;
+                        ++groupCounts[group];
+                    }
+                    for (auto g : groupings) {
+                        unsigned char *start = new unsigned char[INT_BYTES + INT_BYTES + 1 + OFFSET_BYTES];
+                        *reinterpret_cast<SizeType *>(start) = INT_BYTES + INT_BYTES + 1;
+                        unsigned char *data = start + OFFSET_BYTES;
+                        memset(data, 0, 1);
+                        memmove(data + 1, &g.first, INT_BYTES);
+                        if (isAvg) {
+                            float avg = g.second / groupCounts[g.first];
+                            memmove(data + (1 + INT_BYTES), &avg, INT_BYTES);
+                        } else
+                            memmove(data + (1 + INT_BYTES), &g.second, INT_BYTES);
+                        groupAggs.push_back(start);
+                    }
+                } else {
+                    float val, group;
+                    std::unordered_map<float, float> groupings;
+
+                    while (nextVal(&val, nullptr, nullptr, &group, nullptr, TypeReal) != QE_EOF) {
+                        groupings[group] += val;
+                        ++groupCounts[group];
+                    }
+                    for (auto g : groupings) {
+                        unsigned char *start = new unsigned char[INT_BYTES + INT_BYTES + 1 + OFFSET_BYTES];
+                        *reinterpret_cast<SizeType *>(start) = INT_BYTES + INT_BYTES + 1;
+                        unsigned char *data = start + OFFSET_BYTES;
+                        memset(data, 0, 1);
+                        memmove(data + 1, &g.first, INT_BYTES);
+                        *reinterpret_cast<float *>(data + (1 + INT_BYTES)) = isAvg ? g.second / groupCounts[g.first] : g.second;
+                        groupAggs.push_back(start);
+                    }
+                }
+                break;
+            } case TypeVarChar: {
+                std::unordered_map<std::string, float> groupCounts;
+                if (attrs[aggIndex].type == TypeInt) {
+                    int val;
+                    std::string group;
+                    std::unordered_map<std::string, int> groupings;
+
+                    while (nextVal(nullptr, &val, nullptr, nullptr, &group, TypeVarChar) != QE_EOF) {
+                        groupings[group] += val;
+                        ++groupCounts[group];
+                    }
+                    for (auto g : groupings) {
+                        unsigned char *start = new unsigned char[1 + INT_BYTES + g.first.size() + INT_BYTES + OFFSET_BYTES];
+                        *reinterpret_cast<SizeType *>(start) = 1 + INT_BYTES + g.first.size() + INT_BYTES;
+                        unsigned char *data = start + OFFSET_BYTES;
+                        memset(data, 0, 1);
+                        *reinterpret_cast<unsigned *>(data + 1) = g.first.size();
+                        memmove(data + (1 + INT_BYTES), g.first.c_str(), g.first.size());
+                        if (isAvg) {
+                            float avg = g.second / groupCounts[g.first];
+                            memmove(data + (1 + INT_BYTES + g.first.size()), &avg, INT_BYTES);
+                        } else
+                            memmove(data + (1 + INT_BYTES + g.first.size()), &g.second, INT_BYTES);
+                        groupAggs.push_back(start);
+                    }
+                } else {
+                    float val;
+                    std::string group;
+                    std::unordered_map<std::string, float> groupings;
+
+                    while (nextVal(&val, nullptr, nullptr, nullptr, &group, TypeVarChar) != QE_EOF) {
+                        groupings[group] += val;
+                        ++groupCounts[group];
+                    }
+                    for (auto g : groupings) {
+                        unsigned char *start = new unsigned char[1 + INT_BYTES + g.first.size() + INT_BYTES + OFFSET_BYTES];
+                        *reinterpret_cast<SizeType *>(start) = 1 + INT_BYTES + g.first.size() + INT_BYTES;
+                        unsigned char *data = start + OFFSET_BYTES;
+                        memset(data, 0, 1);
+                        *reinterpret_cast<unsigned *>(data + 1) = g.first.size();
+                        memmove(data + (1 + INT_BYTES), g.first.c_str(), g.first.size());
+                        *reinterpret_cast<float *>(data + (1 + INT_BYTES + g.first.size())) = isAvg ? g.second / groupCounts[g.first] : g.second;
+                        groupAggs.push_back(start);
+                    }
+                }
+                break;
+            }
         }
     }
 
     RC Aggregate::getNextTuple(void *data) {
         if (groupAggsIndex >= groupAggs.size()) return QE_EOF;
         const unsigned char *groupAgg = groupAggs[groupAggsIndex++];
-        memmove(data, groupAgg + sizeof(SizeType), *reinterpret_cast<const SizeType *>(groupAgg));
+        memmove(data, groupAgg + OFFSET_BYTES, *reinterpret_cast<const SizeType *>(groupAgg));
         return 0;
     }
 
