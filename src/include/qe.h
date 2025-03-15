@@ -251,6 +251,11 @@ namespace PeterDB {
 
     class Aggregate : public Iterator {
         // Aggregation operator
+        Iterator & iter;
+        std::vector<Attribute> attrs;
+        unsigned aggIndex;
+        AggregateOp op;
+
     public:
         // Mandatory
         // Basic aggregation
