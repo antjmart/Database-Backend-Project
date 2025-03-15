@@ -259,11 +259,9 @@ namespace PeterDB {
         int groupAggsIndex = 0;
         AggregateOp op;
 
-        void minAggregation(void *data);
-        void maxAggregation(void *data);
-        void countAggregation(void *data);
-        void sumAggregation(void *data);
-        void avgAggregation(void *data);
+        void minMaxAggregation(bool isMin);
+        void countAggregation();
+        void sumAvgAggregation(bool isAvg);
         RC nextVal(float *realVal, int *intVal);
 
     public:
