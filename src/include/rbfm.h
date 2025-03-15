@@ -109,6 +109,7 @@ namespace PeterDB {
         friend class RelationManager;
         friend class Filter;
         friend class Project;
+        friend class Aggregate;
 
     public:
         static RecordBasedFileManager &instance();                          // Access to the singleton instance
