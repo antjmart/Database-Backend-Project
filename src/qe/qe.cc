@@ -1,5 +1,6 @@
 #include "src/include/qe.h"
 #include <cstring>
+#include <iostream>
 
 constexpr PeterDB::SizeType BITS_PER_BYTE = 8;
 constexpr PeterDB::SizeType INT_BYTES = 4;
@@ -288,28 +289,7 @@ namespace PeterDB {
         input->getAttributes(attrs);
         aggIndex = 0;
         for (Attribute & attr : attrs) {
-            if (attr.name == aggAttr.name) {
-                std::string opStr;
-                switch (op) {
-                    case MIN:
-                        opStr = "MIN";
-                        break;
-                    case MAX:
-                        opStr = "MAX";
-                        break;
-                    case COUNT:
-                        opStr = "COUNT";
-                        break;
-                    case SUM:
-                        opStr = "SUM";
-                        break;
-                    case AVG:
-                        opStr = "AVG";
-                }
-
-                attr.name = opStr + "(" + attr.name + ")";
-                break;
-            }
+            if (attr.name == aggAttr.name) break;
             ++aggIndex;
         }
     }
@@ -320,8 +300,120 @@ namespace PeterDB {
 
     Aggregate::~Aggregate() = default;
 
+    RC Aggregate::nextVal(float *realVal, int *intVal) {
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        unsigned char nullByte;
+        int bitNum;
+        unsigned char data[PAGE_SIZE];
+        unsigned char *dataStart = static_cast<unsigned char *>(data) + rbfm.nullBytesNeeded(attrs.size());
+        unsigned char *dataPtr = dataStart;
+
+        while (iter.getNextTuple(data) != QE_EOF) {
+            for (unsigned i = 0; i < aggIndex; ++i) {
+                if (i % BITS_PER_BYTE == 0)
+                    memmove(&nullByte, data + i / BITS_PER_BYTE, 1);
+                bitNum = i % BITS_PER_BYTE + 1;
+
+                if (!rbfm.nullBitOn(nullByte, bitNum)) {
+                    if (attrs[i].type == TypeVarChar)
+                        dataPtr += INT_BYTES + *reinterpret_cast<const int *>(dataPtr);
+                    else
+                        dataPtr += INT_BYTES;
+                }
+            }
+
+            if (aggIndex % BITS_PER_BYTE == 0)
+                memmove(&nullByte, data + aggIndex / BITS_PER_BYTE, 1);
+            bitNum = aggIndex % BITS_PER_BYTE + 1;
+            if (!rbfm.nullBitOn(nullByte, bitNum)) {
+                if (intVal == nullptr)
+                    memmove(realVal, dataPtr, INT_BYTES);
+                else
+                    memmove(intVal, dataPtr, INT_BYTES);
+                return 0;
+            }
+            dataPtr = dataStart;
+        }
+        return QE_EOF;
+    }
+
+    void Aggregate::minAggregation(void *data) {
+        if (attrs[aggIndex].type == TypeInt) {
+            int min = std::numeric_limits<int>::max();
+            int val;
+            while (nextVal(nullptr, &val) != QE_EOF)
+                min = std::min(min, val);
+            memmove(static_cast<char *>(data) + 1, &min, INT_BYTES);
+        } else {
+            float min = std::numeric_limits<float>::max();
+            float val;
+            while (nextVal(&val, nullptr) != QE_EOF)
+                min = std::min(min, val);
+            memmove(static_cast<char *>(data) + 1, &min, INT_BYTES);
+        }
+    }
+
+    void Aggregate::maxAggregation(void *data) {
+        if (attrs[aggIndex].type == TypeInt) {
+            int max = std::numeric_limits<int>::min();
+            int val;
+            while (nextVal(nullptr, &val) != QE_EOF)
+                max = std::max(max, val);
+            memmove(static_cast<char *>(data) + 1, &max, INT_BYTES);
+        } else {
+            float max = std::numeric_limits<float>::min();
+            float val;
+            while (nextVal(&val, nullptr) != QE_EOF)
+                max = std::max(max, val);
+            memmove(static_cast<char *>(data) + 1, &max, INT_BYTES);
+        }
+    }
+
+    void Aggregate::countAggregation(void *data) {
+        int count = 0, filler;
+        while (nextVal(nullptr, &filler) != QE_EOF)
+            ++count;
+        memmove(static_cast<char *>(data) + 1, &count, INT_BYTES);
+    }
+
+    void Aggregate::sumAggregation(void *data) {
+        if (attrs[aggIndex].type == TypeInt) {
+            int sum = 0, val;
+            while (nextVal(nullptr, &val) != QE_EOF)
+                sum += val;
+            memmove(static_cast<char *>(data) + 1, &sum, INT_BYTES);
+        } else {
+            float sum = 0, val;
+            while (nextVal(&val, nullptr) != QE_EOF)
+                sum += val;
+            memmove(static_cast<char *>(data) + 1, &sum, INT_BYTES);
+        }
+    }
+
+    void Aggregate::avgAggregation(void *data) {
+        float numVals = 0;
+        if (attrs[aggIndex].type == TypeInt) {
+            int sum = 0, val;
+            while (nextVal(nullptr, &val) != QE_EOF) {
+                sum += val;
+                ++numVals;
+            }
+            float avg = sum / numVals;
+            memmove(static_cast<char *>(data) + 1, &avg, INT_BYTES);
+        } else {
+            float sum = 0, val;
+            while (nextVal(&val, nullptr) != QE_EOF) {
+                sum += val;
+                ++numVals;
+            }
+            float avg = sum / numVals;
+            memmove(static_cast<char *>(data) + 1, &avg, INT_BYTES);
+        }
+    }
+
     RC Aggregate::getNextTuple(void *data) {
         if (hasAggregated) return QE_EOF;
+        memset(data, 0, 1);
         switch (op) {
             case MIN:
                 minAggregation(data);
@@ -344,7 +436,28 @@ namespace PeterDB {
 
     RC Aggregate::getAttributes(std::vector<Attribute> &attrs) const {
         attrs.clear();
-        attrs.push_back(this->attrs[aggIndex]);
+        Attribute attr = this->attrs[aggIndex];
+        std::string opStr;
+        switch (op) {
+            case MIN:
+                opStr = "MIN";
+                break;
+            case MAX:
+                opStr = "MAX";
+                break;
+            case COUNT:
+                opStr = "COUNT";
+                attr.type = TypeInt;
+                break;
+            case SUM:
+                opStr = "SUM";
+                break;
+            case AVG:
+                opStr = "AVG";
+                attr.type = TypeReal;
+        }
+        attr.name = opStr + "(" + attr.name + ")";
+        attrs.push_back(attr);
         return 0;
     }
 } // namespace PeterDB
