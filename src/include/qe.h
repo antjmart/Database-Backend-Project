@@ -182,8 +182,9 @@ namespace PeterDB {
     class Project : public Iterator {
         // Projection operator
         Iterator & iter;
-        std::unordered_set<std::string> projectedAttrs;
         std::vector<Attribute> attrs;
+        std::unordered_set<std::string> projectAttrNames;
+        std::vector<Attribute> projectAttrs;
 
     public:
         Project(Iterator *input,                                // Iterator of input R
