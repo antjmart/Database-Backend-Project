@@ -238,7 +238,7 @@ namespace PeterDB {
     }
 
     BNLJoin::BNLJoin(Iterator *leftIn, TableScan *rightIn, const Condition &condition, const unsigned int numPages)
-        : left(*leftIn), right(*rightIn), cond(condition), byteLimit(numPages * PAGE_SIZE) {
+        : left(*leftIn), right(*rightIn), lhsAttr(condition.lhsAttr), rhsAttr(condition.rhsAttr), byteLimit(numPages * PAGE_SIZE) {
         leftIn->getAttributes(leftAttrs);
         rightIn->getAttributes(rightAttrs);
     }
@@ -266,7 +266,62 @@ namespace PeterDB {
     }
 
     RC BNLJoin::scanLeftIter() {
-        return -1;
+        unsigned char leftTuple[PAGE_SIZE];
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        unsigned char nullByte;
+        int bitNum;
+        SizeType numAttrs = leftAttrs.size();
+        unsigned char *start = leftTuple + rbfm.nullBytesNeeded(numAttrs);
+        unsigned char *ptr, *lhsAttrPos;
+        Attribute & attr = leftAttrs[0];
+        bool nullAttr;
+        AttrType lhsType;
+
+        while (bytesUsed < byteLimit && left.getNextTuple(leftTuple) != QE_EOF) {
+            lhsAttrPos = nullptr;
+            ptr = start;
+
+            for (SizeType i = 0; i < numAttrs; ++i) {
+                if (i % BITS_PER_BYTE == 0)
+                    memmove(&nullByte, leftTuple + i / BITS_PER_BYTE, 1);
+                bitNum = i % BITS_PER_BYTE + 1;
+                attr = leftAttrs[i];
+                nullAttr = rbfm.nullBitOn(nullByte, bitNum);
+
+                if (attr.name == lhsAttr) {
+                    if (nullAttr) break;
+                    lhsAttrPos = ptr;
+                    lhsType = attr.type;
+                }
+
+                if (!nullAttr) {
+                    if (attr.type == TypeVarChar)
+                        ptr += INT_BYTES + *reinterpret_cast<const int *>(ptr);
+                    else
+                        ptr += attr.length;
+                }
+            }
+
+            if (lhsAttrPos) {
+                SizeType neededBytes = OFFSET_BYTES + (ptr - leftTuple);
+                unsigned char *tuple = new unsigned char[neededBytes];
+                *reinterpret_cast<SizeType *>(tuple) = ptr - leftTuple;
+                memmove(tuple + OFFSET_BYTES, leftTuple, ptr - leftTuple);
+                bytesUsed += neededBytes;
+
+                switch (lhsType) {
+                    case TypeInt:
+                        intKeys[*reinterpret_cast<int *>(lhsAttrPos)].push_back(tuple);
+                        break;
+                    case TypeReal:
+                        realKeys[*reinterpret_cast<float *>(lhsAttrPos)].push_back(tuple);
+                        break;
+                    case TypeVarChar:
+                        strKeys[{reinterpret_cast<char *>(lhsAttrPos + INT_BYTES), *reinterpret_cast<unsigned *>(lhsAttrPos)}].push_back(tuple);
+                }
+            }
+        }
+        return bytesUsed > 0 ? 0 : QE_EOF;
     }
 
     bool BNLJoin::hasMatchOnLeft(unsigned char *rightTuple, void *data) {
