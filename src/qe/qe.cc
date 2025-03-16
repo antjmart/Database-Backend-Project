@@ -451,11 +451,15 @@ namespace PeterDB {
         return 0;
     }
 
-    INLJoin::INLJoin(Iterator *leftIn, IndexScan *rightIn, const Condition &condition) {
-
+    INLJoin::INLJoin(Iterator *leftIn, IndexScan *rightIn, const Condition &condition)
+        : left(*leftIn), right(*rightIn), lhsAttr(condition.lhsAttr), rhsAttr(condition.rhsAttr) {
+        leftIn->getAttributes(leftAttrs);
+        rightIn->getAttributes(rightAttrs);
     }
 
-    INLJoin::~INLJoin() {
+    INLJoin::~INLJoin() = default;
+
+    void INLJoin::joinTuples(void *data) {
 
     }
 
@@ -464,7 +468,11 @@ namespace PeterDB {
     }
 
     RC INLJoin::getAttributes(std::vector<Attribute> &attrs) const {
-        return -1;
+        attrs.clear();
+        attrs = leftAttrs;
+        for (const Attribute & attr : rightAttrs)
+            attrs.push_back(attr);
+        return 0;
     }
 
     GHJoin::GHJoin(Iterator *leftIn, Iterator *rightIn, const Condition &condition, const unsigned int numPartitions) {
