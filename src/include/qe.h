@@ -210,10 +210,15 @@ namespace PeterDB {
         std::unordered_map<int, std::vector<unsigned char *>> intKeys;
         std::unordered_map<float, std::vector<unsigned char *>> realKeys;
         std::unordered_map<std::string, std::vector<unsigned char *>> strKeys;
+        std::vector<unsigned char *> *tuplePtr = nullptr;
+        unsigned tupleIndex = 0;
+        unsigned char rightTuple[PAGE_SIZE];
+        SizeType rightTupleSize = 0;
 
         void clearMemory();
         RC scanLeftIter();
-        bool hasMatchOnLeft(unsigned char *rightTuple, void *data);
+        void getLeftMatches();
+        void joinTuples(void *data);
 
     public:
         BNLJoin(Iterator *leftIn,            // Iterator of input R
