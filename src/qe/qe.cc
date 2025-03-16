@@ -237,12 +237,29 @@ namespace PeterDB {
         return 0;
     }
 
-    BNLJoin::BNLJoin(Iterator *leftIn, TableScan *rightIn, const Condition &condition, const unsigned int numPages) {
+    BNLJoin::BNLJoin(Iterator *leftIn, TableScan *rightIn, const Condition &condition, const unsigned int numPages)
+        : left(*leftIn), right(*rightIn), cond(condition), byteLimit(numPages * PAGE_SIZE) {
+        leftIn->getAttributes(leftAttrs);
+        rightIn->getAttributes(rightAttrs);
+    }
 
+    void BNLJoin::clearMemory() {
+        for (auto & tuples : intKeys) {
+            for (unsigned char * tuple : tuples.second)
+                delete[] tuple;
+        }
+        for (auto & tuples : realKeys) {
+            for (unsigned char * tuple : tuples.second)
+                delete[] tuple;
+        }
+        for (auto & tuples : strKeys) {
+            for (unsigned char * tuple : tuples.second)
+                delete[] tuple;
+        }
     }
 
     BNLJoin::~BNLJoin() {
-
+        clearMemory();
     }
 
     RC BNLJoin::getNextTuple(void *data) {
@@ -250,7 +267,11 @@ namespace PeterDB {
     }
 
     RC BNLJoin::getAttributes(std::vector<Attribute> &attrs) const {
-        return -1;
+        attrs.clear();
+        attrs = leftAttrs;
+        for (const Attribute & attr : rightAttrs)
+            attrs.push_back(attr);
+        return 0;
     }
 
     INLJoin::INLJoin(Iterator *leftIn, IndexScan *rightIn, const Condition &condition) {
