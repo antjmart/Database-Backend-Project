@@ -496,8 +496,28 @@ namespace PeterDB {
         }
     }
 
+    void INLJoin::setLeftKey() {
+
+    }
+
+    void INLJoin::setRightTupleSize() {
+
+    }
+
     RC INLJoin::getNextTuple(void *data) {
-        return -1;
+        while (true) {
+            if (scanStarted) {
+                if (right.getNextTuple(rightTuple) != QE_EOF) {
+                    setRightTupleSize();
+                    joinTuples(data);
+                    return 0;
+                }
+            } else scanStarted = true;
+
+            if (left.getNextTuple(leftTuple) == QE_EOF) return QE_EOF;
+            setLeftKey();
+            right.setIterator(leftKey, leftKey, true, true);
+        }
     }
 
     RC INLJoin::getAttributes(std::vector<Attribute> &attrs) const {
