@@ -241,7 +241,6 @@ namespace PeterDB {
         Iterator & left;
         IndexScan & right;
         std::string lhsAttr;
-        std::string rhsAttr;
         std::vector<Attribute> leftAttrs;
         std::vector<Attribute> rightAttrs;
         unsigned char leftTuple[PAGE_SIZE];
@@ -252,7 +251,7 @@ namespace PeterDB {
         unsigned char *leftKey = nullptr;
 
         void joinTuples(void *data);
-        void setLeftKey();
+        RC setLeftKey();
         void setRightTupleSize();
 
     public:
