@@ -256,14 +256,36 @@ namespace PeterDB {
             for (unsigned char * tuple : tuples.second)
                 delete[] tuple;
         }
+        intKeys.clear();
+        realKeys.clear();
+        strKeys.clear();
     }
 
     BNLJoin::~BNLJoin() {
         clearMemory();
     }
 
-    RC BNLJoin::getNextTuple(void *data) {
+    RC BNLJoin::scanLeftIter() {
         return -1;
+    }
+
+    bool BNLJoin::hasMatchOnLeft(unsigned char *rightTuple, void *data) {
+        return false;
+    }
+
+    RC BNLJoin::getNextTuple(void *data) {
+        while (true) {
+            if (bytesUsed == 0) {
+                clearMemory();
+                if (scanLeftIter() == QE_EOF) return QE_EOF;
+                right.setIterator();
+            }
+            unsigned char rightTuple[PAGE_SIZE];
+            while (right.getNextTuple(rightTuple) != QE_EOF) {
+                if (hasMatchOnLeft(rightTuple, data)) return 0;
+            }
+            bytesUsed = 0;
+        }
     }
 
     RC BNLJoin::getAttributes(std::vector<Attribute> &attrs) const {
