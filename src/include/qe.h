@@ -248,8 +248,12 @@ namespace PeterDB {
         SizeType leftTupleSize = 0;
         unsigned char rightTuple[PAGE_SIZE];
         SizeType rightTupleSize = 0;
+        bool scanStarted = false;
+        unsigned char *leftKey = nullptr;
 
         void joinTuples(void *data);
+        void setLeftKey();
+        void setRightTupleSize();
 
     public:
         INLJoin(Iterator *leftIn,           // Iterator of input R
