@@ -199,6 +199,19 @@ namespace PeterDB {
 
     class BNLJoin : public Iterator {
         // Block nested-loop join operator
+        Iterator & left;
+        TableScan & right;
+        const Condition & cond;
+        const unsigned byteLimit;
+        unsigned bytesUsed = 0;
+        std::vector<Attribute> leftAttrs;
+        std::vector<Attribute> rightAttrs;
+        std::unordered_map<int, std::vector<unsigned char *>> intKeys;
+        std::unordered_map<float, std::vector<unsigned char *>> realKeys;
+        std::unordered_map<std::string, std::vector<unsigned char *>> strKeys;
+
+        void clearMemory();
+
     public:
         BNLJoin(Iterator *leftIn,            // Iterator of input R
                 TableScan *rightIn,           // TableScan Iterator of input S
