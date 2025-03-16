@@ -324,20 +324,80 @@ namespace PeterDB {
         return bytesUsed > 0 ? 0 : QE_EOF;
     }
 
-    bool BNLJoin::hasMatchOnLeft(unsigned char *rightTuple, void *data) {
-        return false;
+    void BNLJoin::getLeftMatches() {
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        unsigned char nullByte;
+        int bitNum;
+        SizeType numAttrs = rightAttrs.size();
+        unsigned char *ptr = rightTuple + rbfm.nullBytesNeeded(numAttrs);
+        unsigned char *rhsAttrPos = nullptr;
+        Attribute & attr = rightAttrs[0];
+        bool nullAttr;
+        AttrType rhsType;
+
+        for (SizeType i = 0; i < numAttrs; ++i) {
+            if (i % BITS_PER_BYTE == 0)
+                memmove(&nullByte, rightTuple + i / BITS_PER_BYTE, 1);
+            bitNum = i % BITS_PER_BYTE + 1;
+            attr = leftAttrs[i];
+            nullAttr = rbfm.nullBitOn(nullByte, bitNum);
+
+            if (attr.name == rhsAttr) {
+                if (nullAttr) return;
+                rhsAttrPos = ptr;
+                rhsType = attr.type;
+            }
+
+            if (!nullAttr) {
+                if (attr.type == TypeVarChar)
+                    ptr += INT_BYTES + *reinterpret_cast<const int *>(ptr);
+                else
+                    ptr += attr.length;
+            }
+        }
+
+        rightTupleSize = ptr - rightTuple;
+        switch (rhsType) {
+            case TypeInt: {
+                int key = *reinterpret_cast<int *>(rhsAttrPos);
+                if (intKeys.find(key) != intKeys.end())
+                    tuplePtr = &intKeys[key];
+                break;
+            } case TypeReal: {
+                float key = *reinterpret_cast<float *>(rhsAttrPos);
+                if (realKeys.find(key) != realKeys.end())
+                    tuplePtr = &realKeys[key];
+                break;
+            } case TypeVarChar: {
+                const std::string & key = std::string{reinterpret_cast<char *>(rhsAttrPos + INT_BYTES), *reinterpret_cast<unsigned *>(rhsAttrPos)};
+                if (strKeys.find(key) != strKeys.end())
+                    tuplePtr = &strKeys[key];
+            }
+        }
+    }
+
+    void BNLJoin::joinTuples(void *data) {
+        return;
     }
 
     RC BNLJoin::getNextTuple(void *data) {
+        if (tuplePtr != nullptr) {
+            joinTuples(data);
+            return 0;
+        }
+
         while (true) {
             if (bytesUsed == 0) {
                 clearMemory();
                 if (scanLeftIter() == QE_EOF) return QE_EOF;
                 right.setIterator();
             }
-            unsigned char rightTuple[PAGE_SIZE];
             while (right.getNextTuple(rightTuple) != QE_EOF) {
-                if (hasMatchOnLeft(rightTuple, data)) return 0;
+                getLeftMatches();
+                if (tuplePtr != nullptr) {
+                    joinTuples(data);
+                    return 0;
+                }
             }
             bytesUsed = 0;
         }
