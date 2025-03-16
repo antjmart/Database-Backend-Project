@@ -273,7 +273,7 @@ namespace PeterDB {
         SizeType numAttrs = leftAttrs.size();
         unsigned char *start = leftTuple + rbfm.nullBytesNeeded(numAttrs);
         unsigned char *ptr, *lhsAttrPos;
-        Attribute & attr = leftAttrs[0];
+        Attribute *attr = nullptr;
         bool nullAttr;
         AttrType lhsType;
 
@@ -285,20 +285,20 @@ namespace PeterDB {
                 if (i % BITS_PER_BYTE == 0)
                     memmove(&nullByte, leftTuple + i / BITS_PER_BYTE, 1);
                 bitNum = i % BITS_PER_BYTE + 1;
-                attr = leftAttrs[i];
+                attr = &leftAttrs[i];
                 nullAttr = rbfm.nullBitOn(nullByte, bitNum);
 
-                if (attr.name == lhsAttr) {
+                if (attr->name == lhsAttr) {
                     if (nullAttr) break;
                     lhsAttrPos = ptr;
-                    lhsType = attr.type;
+                    lhsType = attr->type;
                 }
 
                 if (!nullAttr) {
-                    if (attr.type == TypeVarChar)
+                    if (attr->type == TypeVarChar)
                         ptr += INT_BYTES + *reinterpret_cast<const int *>(ptr);
                     else
-                        ptr += attr.length;
+                        ptr += attr->length;
                 }
             }
 
@@ -331,7 +331,7 @@ namespace PeterDB {
         SizeType numAttrs = rightAttrs.size();
         unsigned char *ptr = rightTuple + rbfm.nullBytesNeeded(numAttrs);
         unsigned char *rhsAttrPos = nullptr;
-        Attribute & attr = rightAttrs[0];
+        Attribute *attr = nullptr;
         bool nullAttr;
         AttrType rhsType;
 
@@ -339,20 +339,20 @@ namespace PeterDB {
             if (i % BITS_PER_BYTE == 0)
                 memmove(&nullByte, rightTuple + i / BITS_PER_BYTE, 1);
             bitNum = i % BITS_PER_BYTE + 1;
-            attr = leftAttrs[i];
+            attr = &rightAttrs[i];
             nullAttr = rbfm.nullBitOn(nullByte, bitNum);
 
-            if (attr.name == rhsAttr) {
+            if (attr->name == rhsAttr) {
                 if (nullAttr) return;
                 rhsAttrPos = ptr;
-                rhsType = attr.type;
+                rhsType = attr->type;
             }
 
             if (!nullAttr) {
-                if (attr.type == TypeVarChar)
+                if (attr->type == TypeVarChar)
                     ptr += INT_BYTES + *reinterpret_cast<const int *>(ptr);
                 else
-                    ptr += attr.length;
+                    ptr += attr->length;
             }
         }
 
@@ -377,7 +377,47 @@ namespace PeterDB {
     }
 
     void BNLJoin::joinTuples(void *data) {
-        return;
+        unsigned char *leftTuple = (*tuplePtr)[tupleIndex] + OFFSET_BYTES;
+        SizeType leftTupleSize = *reinterpret_cast<SizeType *>(leftTuple - OFFSET_BYTES);
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        SizeType leftAttrCount = leftAttrs.size(), rightAttrCount = rightAttrs.size(), totalAttrs = leftAttrs.size() + rightAttrs.size();
+        SizeType leftNullBytes = rbfm.nullBytesNeeded(leftAttrCount);
+        SizeType rightNullBytes = rbfm.nullBytesNeeded(rightAttrCount);
+        SizeType totalNullBytes = rbfm.nullBytesNeeded(totalAttrs);
+        memset(data, 0, totalNullBytes);
+
+        unsigned char *dataPtr = static_cast<unsigned char *>(data) + totalNullBytes;
+        memmove(dataPtr, leftTuple + leftNullBytes, leftTupleSize - leftNullBytes);
+        dataPtr += leftTupleSize - leftNullBytes;
+        memmove(dataPtr, rightTuple + rightNullBytes, rightTupleSize - rightNullBytes);
+
+        unsigned char *dataNullByte = static_cast<unsigned char *>(data);
+        unsigned char leftNullByte, rightNullByte;
+        int leftBit, rightBit, dataBit = 1;
+
+        for (SizeType i = 0; i < leftAttrCount; ++i) {
+            if (i % BITS_PER_BYTE == 0)
+                memmove(&leftNullByte, leftTuple + i / BITS_PER_BYTE, 1);
+            leftBit = i % BITS_PER_BYTE + 1;
+            if (rbfm.nullBitOn(leftNullByte, leftBit))
+                *dataNullByte |= 1 << (BITS_PER_BYTE - dataBit);
+            if (dataBit == BITS_PER_BYTE) ++dataNullByte;
+            dataBit = dataBit % BITS_PER_BYTE + 1;
+        }
+        for (SizeType i = 0; i < rightAttrCount; ++i) {
+            if (i % BITS_PER_BYTE == 0)
+                memmove(&rightNullByte, rightTuple + i / BITS_PER_BYTE, 1);
+            rightBit = i % BITS_PER_BYTE + 1;
+            if (rbfm.nullBitOn(rightNullByte, rightBit))
+                *dataNullByte |= 1 << (BITS_PER_BYTE - dataBit);
+            if (dataBit == BITS_PER_BYTE) ++dataNullByte;
+            dataBit = dataBit % BITS_PER_BYTE + 1;
+        }
+
+        if (++tupleIndex >= tuplePtr->size()) {
+            tuplePtr = nullptr;
+            tupleIndex = 0;
+        }
     }
 
     RC BNLJoin::getNextTuple(void *data) {
