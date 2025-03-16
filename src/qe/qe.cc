@@ -219,7 +219,7 @@ namespace PeterDB {
             if (dataPtr == nullptr) {
                 *projectNullByte |= 1 << (BITS_PER_BYTE - projectBitNum);
             } else {
-                bytesToCopy = attr->type == TypeVarChar ? INT_BYTES + *reinterpret_cast<const int *>(dataPtr) : attr->length;
+                bytesToCopy = attribute.type == TypeVarChar ? INT_BYTES + *reinterpret_cast<const int *>(dataPtr) : attribute.length;
                 memmove(projectPtr, dataPtr, bytesToCopy);
                 projectPtr += bytesToCopy;
             }
