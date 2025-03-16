@@ -111,6 +111,7 @@ namespace PeterDB {
         friend class Project;
         friend class Aggregate;
         friend class BNLJoin;
+        friend class INLJoin;
 
     public:
         static RecordBasedFileManager &instance();                          // Access to the singleton instance
