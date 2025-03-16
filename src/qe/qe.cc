@@ -84,7 +84,7 @@ namespace PeterDB {
         int bitNum;
         char *dataPtr = static_cast<char *>(data) + nullBytes;
         SizeType numAttrs = attrs.size();
-        Attribute attr;
+        Attribute *attr = nullptr;
 
         if (cond.bRhsIsAttr) {
             AttrType leftType, rightType;
@@ -94,26 +94,26 @@ namespace PeterDB {
                 if (i % BITS_PER_BYTE == 0)
                     memmove(&nullByte, static_cast<const char *>(data) + i / BITS_PER_BYTE, 1);
                 bitNum = i % BITS_PER_BYTE + 1;
-                attr = attrs[i];
+                attr = &attrs[i];
                 bool nullAttr = rbfm.nullBitOn(nullByte, bitNum);
 
-                if (attr.name == cond.lhsAttr) {
+                if (attr->name == cond.lhsAttr) {
                     if (nullAttr) return false;
-                    leftType = attr.type;
+                    leftType = attr->type;
                     leftValue = static_cast<void *>(dataPtr);
                 }
 
-                if (attr.name == cond.rhsAttr) {
+                if (attr->name == cond.rhsAttr) {
                     if (nullAttr) return false;
-                    rightType = attr.type;
+                    rightType = attr->type;
                     rightValue = static_cast<void *>(dataPtr);
                 }
 
                 if (!nullAttr) {
-                    if (attr.type == TypeVarChar)
+                    if (attr->type == TypeVarChar)
                         dataPtr += INT_BYTES + *reinterpret_cast<const int *>(dataPtr);
                     else
-                        dataPtr += attr.length;
+                        dataPtr += attr->length;
                 }
             }
 
@@ -125,19 +125,19 @@ namespace PeterDB {
                 if (i % BITS_PER_BYTE == 0)
                     memmove(&nullByte, static_cast<const char *>(data) + i / BITS_PER_BYTE, 1);
                 bitNum = i % BITS_PER_BYTE + 1;
-                attr = attrs[i];
+                attr = &attrs[i];
 
-                if (attr.name == cond.lhsAttr) {
-                    if (rbfm.nullBitOn(nullByte, bitNum) || attr.type != cond.rhsValue.type)
+                if (attr->name == cond.lhsAttr) {
+                    if (rbfm.nullBitOn(nullByte, bitNum) || attr->type != cond.rhsValue.type)
                         return false;
-                    return compareValues(dataPtr, cond.rhsValue.data, attr.type);
+                    return compareValues(dataPtr, cond.rhsValue.data, attr->type);
                 }
 
                 if (!rbfm.nullBitOn(nullByte, bitNum)) {
-                    if (attr.type == TypeVarChar)
+                    if (attr->type == TypeVarChar)
                         dataPtr += INT_BYTES + *reinterpret_cast<const int *>(dataPtr);
                     else
-                        dataPtr += attr.length;
+                        dataPtr += attr->length;
                 }
             }
             return false;
@@ -185,7 +185,7 @@ namespace PeterDB {
         int bitNum;
         SizeType numAttrs = attrs.size();
         unsigned char *dataPtr = static_cast<unsigned char *>(data) + rbfm.nullBytesNeeded(numAttrs);
-        Attribute & attr = attrs[0];
+        Attribute *attr = nullptr;
         bool nullAttr;
         std::unordered_map<std::string, unsigned char *> projectLocations;
 
@@ -193,17 +193,17 @@ namespace PeterDB {
             if (i % BITS_PER_BYTE == 0)
                 memmove(&nullByte, static_cast<const char *>(data) + i / BITS_PER_BYTE, 1);
             bitNum = i % BITS_PER_BYTE + 1;
-            attr = attrs[i];
+            attr = &attrs[i];
             nullAttr = rbfm.nullBitOn(nullByte, bitNum);
 
-            if (projectAttrNames.find(attr.name) != projectAttrNames.end())
-                projectLocations[attr.name] = nullAttr ? nullptr : dataPtr;
+            if (projectAttrNames.find(attr->name) != projectAttrNames.end())
+                projectLocations[attr->name] = nullAttr ? nullptr : dataPtr;
 
             if (!nullAttr) {
-                if (attr.type == TypeVarChar)
+                if (attr->type == TypeVarChar)
                     dataPtr += INT_BYTES + *reinterpret_cast<const int *>(dataPtr);
                 else
-                    dataPtr += attr.length;
+                    dataPtr += attr->length;
             }
         }
 
@@ -219,7 +219,7 @@ namespace PeterDB {
             if (dataPtr == nullptr) {
                 *projectNullByte |= 1 << (BITS_PER_BYTE - projectBitNum);
             } else {
-                bytesToCopy = attr.type == TypeVarChar ? INT_BYTES + *reinterpret_cast<const int *>(dataPtr) : attr.length;
+                bytesToCopy = attr->type == TypeVarChar ? INT_BYTES + *reinterpret_cast<const int *>(dataPtr) : attr->length;
                 memmove(projectPtr, dataPtr, bytesToCopy);
                 projectPtr += bytesToCopy;
             }
@@ -452,7 +452,7 @@ namespace PeterDB {
     }
 
     INLJoin::INLJoin(Iterator *leftIn, IndexScan *rightIn, const Condition &condition)
-        : left(*leftIn), right(*rightIn), lhsAttr(condition.lhsAttr), rhsAttr(condition.rhsAttr) {
+        : left(*leftIn), right(*rightIn), lhsAttr(condition.lhsAttr) {
         leftIn->getAttributes(leftAttrs);
         rightIn->getAttributes(rightAttrs);
     }
@@ -496,12 +496,60 @@ namespace PeterDB {
         }
     }
 
-    void INLJoin::setLeftKey() {
+    RC INLJoin::setLeftKey() {
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        unsigned char nullByte;
+        int bitNum;
+        SizeType numAttrs = leftAttrs.size();
+        unsigned char *ptr = leftTuple + rbfm.nullBytesNeeded(numAttrs);
+        Attribute *attr = nullptr;
+        bool nullAttr;
 
+        for (SizeType i = 0; i < numAttrs; ++i) {
+            if (i % BITS_PER_BYTE == 0)
+                memmove(&nullByte, leftTuple + i / BITS_PER_BYTE, 1);
+            bitNum = i % BITS_PER_BYTE + 1;
+            attr = &leftAttrs[i];
+            nullAttr = rbfm.nullBitOn(nullByte, bitNum);
+
+            if (attr->name == lhsAttr) {
+                if (nullAttr) return -1;
+                leftKey = ptr;
+            }
+
+            if (!nullAttr) {
+                if (attr->type == TypeVarChar)
+                    ptr += INT_BYTES + *reinterpret_cast<const int *>(ptr);
+                else
+                    ptr += attr->length;
+            }
+        }
+        leftTupleSize = ptr - leftTuple;
+        return 0;
     }
 
     void INLJoin::setRightTupleSize() {
+        RecordBasedFileManager & rbfm = RecordBasedFileManager::instance();
+        unsigned char nullByte;
+        int bitNum;
+        SizeType numAttrs = rightAttrs.size();
+        unsigned char *ptr = rightTuple + rbfm.nullBytesNeeded(numAttrs);
+        Attribute *attr = nullptr;
 
+        for (SizeType i = 0; i < numAttrs; ++i) {
+            if (i % BITS_PER_BYTE == 0)
+                memmove(&nullByte, rightTuple + i / BITS_PER_BYTE, 1);
+            bitNum = i % BITS_PER_BYTE + 1;
+            attr = &rightAttrs[i];
+
+            if (!rbfm.nullBitOn(nullByte, bitNum)) {
+                if (attr->type == TypeVarChar)
+                    ptr += INT_BYTES + *reinterpret_cast<const int *>(ptr);
+                else
+                    ptr += attr->length;
+            }
+        }
+        rightTupleSize = ptr - rightTuple;
     }
 
     RC INLJoin::getNextTuple(void *data) {
@@ -514,8 +562,10 @@ namespace PeterDB {
                 }
             } else scanStarted = true;
 
-            if (left.getNextTuple(leftTuple) == QE_EOF) return QE_EOF;
-            setLeftKey();
+            while (true) {
+                if (left.getNextTuple(leftTuple) == QE_EOF) return QE_EOF;
+                if (setLeftKey() == 0) break;
+            }
             right.setIterator(leftKey, leftKey, true, true);
         }
     }
