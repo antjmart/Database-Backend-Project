@@ -201,7 +201,8 @@ namespace PeterDB {
         // Block nested-loop join operator
         Iterator & left;
         TableScan & right;
-        const Condition & cond;
+        const std::string & lhsAttr;
+        const std::string & rhsAttr;
         const unsigned byteLimit;
         unsigned bytesUsed = 0;
         std::vector<Attribute> leftAttrs;
