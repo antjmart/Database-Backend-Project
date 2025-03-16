@@ -211,6 +211,8 @@ namespace PeterDB {
         std::unordered_map<std::string, std::vector<unsigned char *>> strKeys;
 
         void clearMemory();
+        RC scanLeftIter();
+        bool hasMatchOnLeft(unsigned char *rightTuple, void *data);
 
     public:
         BNLJoin(Iterator *leftIn,            // Iterator of input R
