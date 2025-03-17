@@ -609,35 +609,52 @@ namespace PeterDB {
     }
 
     void GHJoin::joinTuples(void *data) {
-        SizeType leftAttrCount = leftAttrs.size(), rightAttrCount = rightAttrs.size(), totalAttrs = leftAttrs.size() + rightAttrs.size();
-        SizeType leftNullBytes = rbfm.nullBytesNeeded(leftAttrCount);
-        SizeType rightNullBytes = rbfm.nullBytesNeeded(rightAttrCount);
+        SizeType firstAttrCount, secondAttrCount, firstSize, secondSize;
+        unsigned char *first, *second;
+        if (leftIsOuter) {
+            firstAttrCount = leftAttrs.size();
+            secondAttrCount = rightAttrs.size();
+            first = leftTuple;
+            second = rightTuple;
+            firstSize = leftTupleSize;
+            secondSize = rightTupleSize;
+        } else {
+            firstAttrCount = rightAttrs.size();
+            secondAttrCount = leftAttrs.size();
+            first = rightTuple;
+            second = leftTuple;
+            firstSize = rightTupleSize;
+            secondSize = leftTupleSize;
+        }
+        SizeType totalAttrs = leftAttrs.size() + rightAttrs.size();
+        SizeType firstNullBytes = rbfm.nullBytesNeeded(firstAttrCount);
+        SizeType secondNullBytes = rbfm.nullBytesNeeded(secondAttrCount);
         SizeType totalNullBytes = rbfm.nullBytesNeeded(totalAttrs);
         memset(data, 0, totalNullBytes);
 
         unsigned char *dataPtr = static_cast<unsigned char *>(data) + totalNullBytes;
-        memmove(dataPtr, leftTuple + leftNullBytes, leftTupleSize - leftNullBytes);
-        dataPtr += leftTupleSize - leftNullBytes;
-        memmove(dataPtr, rightTuple + rightNullBytes, rightTupleSize - rightNullBytes);
+        memmove(dataPtr, first + firstNullBytes, firstSize - firstNullBytes);
+        dataPtr += firstSize - firstNullBytes;
+        memmove(dataPtr, second + secondNullBytes, secondSize - secondNullBytes);
 
         unsigned char *dataNullByte = static_cast<unsigned char *>(data);
-        unsigned char leftNullByte, rightNullByte;
-        int leftBit, rightBit, dataBit = 1;
+        unsigned char firstNullByte, secondNullByte;
+        int firstBit, secondBit, dataBit = 1;
 
-        for (SizeType i = 0; i < leftAttrCount; ++i) {
+        for (SizeType i = 0; i < firstAttrCount; ++i) {
             if (i % BITS_PER_BYTE == 0)
-                memmove(&leftNullByte, leftTuple + i / BITS_PER_BYTE, 1);
-            leftBit = i % BITS_PER_BYTE + 1;
-            if (rbfm.nullBitOn(leftNullByte, leftBit))
+                memmove(&firstNullByte, first + i / BITS_PER_BYTE, 1);
+            firstBit = i % BITS_PER_BYTE + 1;
+            if (rbfm.nullBitOn(firstNullByte, firstBit))
                 *dataNullByte |= 1 << (BITS_PER_BYTE - dataBit);
             if (dataBit == BITS_PER_BYTE) ++dataNullByte;
             dataBit = dataBit % BITS_PER_BYTE + 1;
         }
-        for (SizeType i = 0; i < rightAttrCount; ++i) {
+        for (SizeType i = 0; i < secondAttrCount; ++i) {
             if (i % BITS_PER_BYTE == 0)
-                memmove(&rightNullByte, rightTuple + i / BITS_PER_BYTE, 1);
-            rightBit = i % BITS_PER_BYTE + 1;
-            if (rbfm.nullBitOn(rightNullByte, rightBit))
+                memmove(&secondNullByte, second + i / BITS_PER_BYTE, 1);
+            secondBit = i % BITS_PER_BYTE + 1;
+            if (rbfm.nullBitOn(secondNullByte, secondBit))
                 *dataNullByte |= 1 << (BITS_PER_BYTE - dataBit);
             if (dataBit == BITS_PER_BYTE) ++dataNullByte;
             dataBit = dataBit % BITS_PER_BYTE + 1;
