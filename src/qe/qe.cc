@@ -583,7 +583,65 @@ namespace PeterDB {
     }
 
     GHJoin::~GHJoin() {
+        clearMemory();
+        for (const std::string &partition : leftPartitions)
+            rbfm.destroyFile(partition);
+        for (const std::string &partition : rightPartitions)
+            rbfm.destroyFile(partition);
+    }
 
+    void GHJoin::clearMemory() {
+        for (auto & tuples : intKeys) {
+            for (unsigned char * tuple : tuples.second)
+                delete[] tuple;
+        }
+        for (auto & tuples : realKeys) {
+            for (unsigned char * tuple : tuples.second)
+                delete[] tuple;
+        }
+        for (auto & tuples : strKeys) {
+            for (unsigned char * tuple : tuples.second)
+                delete[] tuple;
+        }
+        intKeys.clear();
+        realKeys.clear();
+        strKeys.clear();
+    }
+
+    void GHJoin::joinTuples(void *data) {
+        SizeType leftAttrCount = leftAttrs.size(), rightAttrCount = rightAttrs.size(), totalAttrs = leftAttrs.size() + rightAttrs.size();
+        SizeType leftNullBytes = rbfm.nullBytesNeeded(leftAttrCount);
+        SizeType rightNullBytes = rbfm.nullBytesNeeded(rightAttrCount);
+        SizeType totalNullBytes = rbfm.nullBytesNeeded(totalAttrs);
+        memset(data, 0, totalNullBytes);
+
+        unsigned char *dataPtr = static_cast<unsigned char *>(data) + totalNullBytes;
+        memmove(dataPtr, leftTuple + leftNullBytes, leftTupleSize - leftNullBytes);
+        dataPtr += leftTupleSize - leftNullBytes;
+        memmove(dataPtr, rightTuple + rightNullBytes, rightTupleSize - rightNullBytes);
+
+        unsigned char *dataNullByte = static_cast<unsigned char *>(data);
+        unsigned char leftNullByte, rightNullByte;
+        int leftBit, rightBit, dataBit = 1;
+
+        for (SizeType i = 0; i < leftAttrCount; ++i) {
+            if (i % BITS_PER_BYTE == 0)
+                memmove(&leftNullByte, leftTuple + i / BITS_PER_BYTE, 1);
+            leftBit = i % BITS_PER_BYTE + 1;
+            if (rbfm.nullBitOn(leftNullByte, leftBit))
+                *dataNullByte |= 1 << (BITS_PER_BYTE - dataBit);
+            if (dataBit == BITS_PER_BYTE) ++dataNullByte;
+            dataBit = dataBit % BITS_PER_BYTE + 1;
+        }
+        for (SizeType i = 0; i < rightAttrCount; ++i) {
+            if (i % BITS_PER_BYTE == 0)
+                memmove(&rightNullByte, rightTuple + i / BITS_PER_BYTE, 1);
+            rightBit = i % BITS_PER_BYTE + 1;
+            if (rbfm.nullBitOn(rightNullByte, rightBit))
+                *dataNullByte |= 1 << (BITS_PER_BYTE - dataBit);
+            if (dataBit == BITS_PER_BYTE) ++dataNullByte;
+            dataBit = dataBit % BITS_PER_BYTE + 1;
+        }
     }
 
     RC GHJoin::getNextTuple(void *data) {
