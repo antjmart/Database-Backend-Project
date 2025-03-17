@@ -271,6 +271,30 @@ namespace PeterDB {
     // 10 extra-credit points
     class GHJoin : public Iterator {
         // Grace hash join operator
+        RecordBasedFileManager &rbfm = RecordBasedFileManager::instance();
+        Iterator & left;
+        Iterator & right;
+        std::string lhsAttr;
+        std::string rhsAttr;
+        std::vector<Attribute> leftAttrs;
+        std::vector<Attribute> rightAttrs;
+        std::unordered_map<int, std::vector<unsigned char *>> intKeys;
+        std::unordered_map<float, std::vector<unsigned char *>> realKeys;
+        std::unordered_map<std::string, std::vector<unsigned char *>> strKeys;
+        std::vector<unsigned char *> *tuplePtr = nullptr;
+        unsigned tupleIndex = 0;
+        unsigned char leftTuple[PAGE_SIZE];
+        SizeType leftTupleSize = 0;
+        unsigned char rightTuple[PAGE_SIZE];
+        SizeType rightTupleSize = 0;
+        std::vector<std::string> leftPartitions;
+        std::vector<std::string> rightPartitions;
+        FileHandle leftFh;
+        FileHandle rightFh;
+
+        void clearMemory();
+        void joinTuples(void *data);
+
     public:
         GHJoin(Iterator *leftIn,               // Iterator of input R
                Iterator *rightIn,               // Iterator of input S
