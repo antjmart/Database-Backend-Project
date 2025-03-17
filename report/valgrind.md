@@ -59,3 +59,10 @@ IndexManager Tests Run with Valgrind Memcheck:
 
 Clean memory usage, no errors or leaks. Some warnings coming from provided files,
 but nothing that is sourced from my own written code.
+
+QueryEngine Tests Run with Valgrind Memcheck:
+
+![img_5.png](img_5.png)
+
+Clean memory usage from my code, no errors or leaks. Some warnings from provided test files but no sources from
+my own written code.
