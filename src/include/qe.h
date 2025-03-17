@@ -271,26 +271,33 @@ namespace PeterDB {
     // 10 extra-credit points
     class GHJoin : public Iterator {
         // Grace hash join operator
-        RecordBasedFileManager &rbfm = RecordBasedFileManager::instance();
+        RecordBasedFileManager & rbfm;
+        RBFM_ScanIterator scanner;
         Iterator & left;
         Iterator & right;
+        // keeps track of attribute information for each Iterator
         std::string lhsAttr;
         std::string rhsAttr;
         std::vector<Attribute> leftAttrs;
         std::vector<Attribute> rightAttrs;
+
+        // maps used to line up a key to different left tuples for right tuples to be matched with
         std::unordered_map<int, std::vector<unsigned char *>> intKeys;
         std::unordered_map<float, std::vector<unsigned char *>> realKeys;
         std::unordered_map<std::string, std::vector<unsigned char *>> strKeys;
-        std::vector<unsigned char *> *tuplePtr = nullptr;
-        unsigned tupleIndex = 0;
+        std::vector<unsigned char *> *tuplePtr;
+        unsigned tupleIndex;
+
+        // byte arrays for storing current left and right tuples
         unsigned char leftTuple[PAGE_SIZE];
-        SizeType leftTupleSize = 0;
         unsigned char rightTuple[PAGE_SIZE];
-        SizeType rightTupleSize = 0;
+        SizeType leftTupleSize, rightTupleSize;
+        bool leftIsOuter;
+
+        // hash value will be an index into vector, value is file name of the partition
         std::vector<std::string> leftPartitions;
         std::vector<std::string> rightPartitions;
-        FileHandle leftFh;
-        FileHandle rightFh;
+        FileHandle *fh;
 
         void clearMemory();
         void joinTuples(void *data);
