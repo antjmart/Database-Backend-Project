@@ -578,8 +578,89 @@ namespace PeterDB {
         return 0;
     }
 
-    GHJoin::GHJoin(Iterator *leftIn, Iterator *rightIn, const Condition &condition, const unsigned int numPartitions) {
+    RC GHJoin::getMatchingPartition(unsigned &partition, const unsigned &numPartitions, const std::vector<Attribute> &attrs, const std::string &keyAttr) {
+        unsigned char nullByte;
+        int bitNum;
+        SizeType numAttrs = attrs.size();
+        unsigned char *ptr = leftTuple + rbfm.nullBytesNeeded(numAttrs);
+        const Attribute *attr = nullptr;
+        bool nullAttr;
 
+        for (SizeType i = 0; i < numAttrs; ++i) {
+            if (i % BITS_PER_BYTE == 0)
+                memmove(&nullByte, leftTuple + i / BITS_PER_BYTE, 1);
+            bitNum = i % BITS_PER_BYTE + 1;
+            attr = &attrs[i];
+            nullAttr = rbfm.nullBitOn(nullByte, bitNum);
+
+            if (attr->name == keyAttr) {
+                if (nullAttr) break;
+                switch (attr->type) {
+                    case TypeInt:
+                        partition = std::hash<int>{}(*reinterpret_cast<int *>(ptr)) % numPartitions;
+                        break;
+                    case TypeReal:
+                        partition = std::hash<float>{}(*reinterpret_cast<float *>(ptr)) % numPartitions;
+                        break;
+                    case TypeVarChar:
+                        const std::string & key = std::string{reinterpret_cast<char *>(ptr + INT_BYTES), *reinterpret_cast<unsigned *>(ptr)};
+                        partition = std::hash<std::string>{}(key) % numPartitions;
+                }
+                return 0;
+            }
+
+            if (!nullAttr) {
+                if (attr->type == TypeVarChar)
+                    ptr += INT_BYTES + *reinterpret_cast<const int *>(ptr);
+                else
+                    ptr += attr->length;
+            }
+        }
+        return -1;
+    }
+
+    void GHJoin::createPartitions(const unsigned &numPartitions, bool forOuter) {
+        std::vector<std::string> & partitions = forOuter ? leftPartitions : rightPartitions;
+        std::vector<FileHandle> fhandles;
+        partitions.reserve(numPartitions);
+        fhandles.reserve(numPartitions);
+        std::string baseFileName = forOuter ? "left" : "right";
+        std::string fileName;
+
+        for (unsigned i = 0; i < numPartitions; ++i) {
+            unsigned underscores = 1;
+            fileName = baseFileName + "_" + std::to_string(i);
+            while (rbfm.createFile(fileName) == -1) {
+                ++underscores;
+                fileName = baseFileName;
+                for (unsigned u = 0; u < underscores; ++u) fileName += "_";
+                fileName += std::to_string(i);
+            }
+            partitions[i] = fileName;
+            rbfm.openFile(fileName, fhandles[i]);
+        }
+
+        Iterator & iter = forOuter ? left : right;
+        std::vector<Attribute> & attrs = forOuter ? leftAttrs : rightAttrs;
+        std::string & keyAttr = forOuter ? lhsAttr : rhsAttr;
+        unsigned partition;
+        RID rid{};
+        while (iter.getNextTuple(leftTuple) != QE_EOF) {
+            if (getMatchingPartition(partition, numPartitions, attrs, keyAttr) == 0)
+                rbfm.insertRecord(fhandles[partition], attrs, leftTuple, rid);
+        }
+
+        for (FileHandle & fh : fhandles)
+            rbfm.closeFile(fh);
+    }
+
+    GHJoin::GHJoin(Iterator *leftIn, Iterator *rightIn, const Condition &condition, const unsigned int numPartitions)
+        : rbfm(RecordBasedFileManager::instance()), left(*leftIn), right(*rightIn), lhsAttr(condition.lhsAttr),
+          rhsAttr(condition.rhsAttr), tuplePtr(nullptr), tupleIndex(0), fh(nullptr) {
+        leftIn->getAttributes(leftAttrs);
+        rightIn->getAttributes(rightAttrs);
+        createPartitions(numPartitions, true);
+        createPartitions(numPartitions, false);
     }
 
     GHJoin::~GHJoin() {
@@ -666,7 +747,11 @@ namespace PeterDB {
     }
 
     RC GHJoin::getAttributes(std::vector<Attribute> &attrs) const {
-        return -1;
+        attrs.clear();
+        attrs = leftAttrs;
+        for (const Attribute & attr : rightAttrs)
+            attrs.push_back(attr);
+        return 0;
     }
 
     Aggregate::Aggregate(Iterator *input, const Attribute &aggAttr, AggregateOp op)
