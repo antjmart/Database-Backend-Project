@@ -621,9 +621,7 @@ namespace PeterDB {
 
     void GHJoin::createPartitions(const unsigned &numPartitions, bool forOuter) {
         std::vector<std::string> & partitions = forOuter ? leftPartitions : rightPartitions;
-        std::vector<FileHandle> fhandles;
-        partitions.reserve(numPartitions);
-        fhandles.reserve(numPartitions);
+        std::vector<FileHandle> fhandles{numPartitions, FileHandle{}};
         std::string baseFileName = forOuter ? "left" : "right";
         std::string fileName;
 
@@ -656,7 +654,8 @@ namespace PeterDB {
 
     GHJoin::GHJoin(Iterator *leftIn, Iterator *rightIn, const Condition &condition, const unsigned int numPartitions)
         : rbfm(RecordBasedFileManager::instance()), left(*leftIn), right(*rightIn), lhsAttr(condition.lhsAttr),
-          rhsAttr(condition.rhsAttr), tuplePtr(nullptr), tupleIndex(0), fh(nullptr) {
+          rhsAttr(condition.rhsAttr), tuplePtr(nullptr), tupleIndex(0), leftPartitions(numPartitions, ""),
+          rightPartitions(numPartitions, ""), fh(nullptr) {
         leftIn->getAttributes(leftAttrs);
         rightIn->getAttributes(rightAttrs);
         createPartitions(numPartitions, true);
