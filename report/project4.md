@@ -72,7 +72,22 @@ the LHS tuples are hit, then EOF is reached for INLJoin.
 ### 7. Grace Hash Join (If you have implemented this feature)
 - Describe how your grace hash join works (especially, in-memory structure).
 
-
+My GHJoin keeps a vector of partition file names for the outer iterator, and one for the inner iterator. When constructing
+the GHJoin object is when the partitions are set up. Start first with the outer iterator, the "left" side. Create a vector
+of FileHandle objects. Go through each index number up to numPartitions, assigning a file name to the partition vector and
+opening the corresponding FileHandle object with that file name. Keep getting tuples from the Iterator object until none left.
+For each tuple, get the key value and use std::hash(key value) mod numPartitions to get partition hash. Use that hash to index
+into file handle vector and insert a record into that partition file with the tuple data. Repeat this entire process over
+again for the inner Iterator, the "right" side. When getting next tuple from GHJoin, first check if we have any partition data
+in memory (boolean check if scanning is happening). If not, use a RBFM_ScanIterator on the smaller partition file with the
+current partition number index (compare page counts on each file handle). Iterate through, add tuple arrays to unordered_map
+mapping the join attribute to the vector of arrays. With a partition now mapped in memory, start a RBFM_ScanIterator on
+the partition, with current partition index, of the side that was not used. For each tuple, check if there is a match
+in the unordered_map, if so then combine together current scanned tuple with the tuple from map, putting the scanned tuple
+in the order first if it is originally from the outer Iterator, and finally return. More iterations will go through the rest
+of this mapped vector of tuple arrays. QE_EOF for GHJoin is reached when it goes to load in a new partition to maps in memory
+but partition index is equal to numPartitions. The maps in memory are cleared and deallocated before loading in new partitions,
+but partition files are destroyed specficially in GHJoin destructor.
 
 ### 8. Aggregation
 - Describe how your basic aggregation works.
