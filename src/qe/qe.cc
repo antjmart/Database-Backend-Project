@@ -665,6 +665,7 @@ namespace PeterDB {
 
     GHJoin::~GHJoin() {
         clearMemory();
+        scanner.close();
         for (const std::string &partition : leftPartitions)
             rbfm.destroyFile(partition);
         for (const std::string &partition : rightPartitions)
@@ -740,10 +741,46 @@ namespace PeterDB {
             if (dataBit == BITS_PER_BYTE) ++dataNullByte;
             dataBit = dataBit % BITS_PER_BYTE + 1;
         }
+
+        if (++tupleIndex >= tuplePtr->size()) {
+            tuplePtr = nullptr;
+            tupleIndex = 0;
+        }
+    }
+
+    void GHJoin::processSmallerPartition() {
+
+    }
+
+    void GHJoin::getMatches() {
+
     }
 
     RC GHJoin::getNextTuple(void *data) {
-        return -1;
+        if (tuplePtr != nullptr) {
+            joinTuples(data);
+            return 0;
+        }
+
+        while (true) {
+            if (!scanningPartition) {
+                if (partitionNum >= numPartitions) return QE_EOF;
+                processSmallerPartition();
+                scanningPartition = true;
+            }
+            RID rid{};
+            while (scanner.getNextRecord(rid, rightTuple) != RBFM_EOF) {
+                getMatches();
+                if (tuplePtr != nullptr) {
+                    joinTuples(data);
+                    return 0;
+                }
+            }
+            scanningPartition = false;
+            ++partitionNum;
+            clearMemory();
+            scanner.close();
+        }
     }
 
     RC GHJoin::getAttributes(std::vector<Attribute> &attrs) const {
