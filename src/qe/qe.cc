@@ -582,13 +582,13 @@ namespace PeterDB {
         unsigned char nullByte;
         int bitNum;
         SizeType numAttrs = attrs.size();
-        unsigned char *ptr = leftTuple + rbfm.nullBytesNeeded(numAttrs);
+        unsigned char *ptr = rightTuple + rbfm.nullBytesNeeded(numAttrs);
         const Attribute *attr = nullptr;
         bool nullAttr;
 
         for (SizeType i = 0; i < numAttrs; ++i) {
             if (i % BITS_PER_BYTE == 0)
-                memmove(&nullByte, leftTuple + i / BITS_PER_BYTE, 1);
+                memmove(&nullByte, rightTuple + i / BITS_PER_BYTE, 1);
             bitNum = i % BITS_PER_BYTE + 1;
             attr = &attrs[i];
             nullAttr = rbfm.nullBitOn(nullByte, bitNum);
@@ -643,9 +643,9 @@ namespace PeterDB {
         std::string & keyAttr = forOuter ? lhsAttr : rhsAttr;
         unsigned partition;
         RID rid{};
-        while (iter.getNextTuple(leftTuple) != QE_EOF) {
+        while (iter.getNextTuple(rightTuple) != QE_EOF) {
             if (getMatchingPartition(partition, attrs, keyAttr) == 0)
-                rbfm.insertRecord(fhandles[partition], attrs, leftTuple, rid);
+                rbfm.insertRecord(fhandles[partition], attrs, rightTuple, rid);
         }
 
         for (FileHandle & fh : fhandles)
@@ -695,6 +695,8 @@ namespace PeterDB {
     }
 
     void GHJoin::joinTuples(void *data) {
+        unsigned char *leftTuple = (*tuplePtr)[tupleIndex] + OFFSET_BYTES;
+        SizeType leftTupleSize = *reinterpret_cast<SizeType *>(leftTuple - OFFSET_BYTES);
         SizeType firstAttrCount, secondAttrCount, firstSize, secondSize;
         unsigned char *first, *second;
         if (leftIsOuter) {
@@ -763,7 +765,7 @@ namespace PeterDB {
         unsigned char nullByte;
         int bitNum;
         SizeType numAttrs = leftIsOuter ? leftAttrs.size() : rightAttrs.size();
-        unsigned char *start = leftTuple + rbfm.nullBytesNeeded(numAttrs);
+        unsigned char *start = rightTuple + rbfm.nullBytesNeeded(numAttrs);
         unsigned char *ptr, *keyAttrPos;
         Attribute *attr = nullptr;
         bool nullAttr, tuplesWereMapped = false;
@@ -773,15 +775,17 @@ namespace PeterDB {
         const std::vector<std::string> & attrNames = leftIsOuter ? leftAttrNames : rightAttrNames;
         const std::string & keyAttr = leftIsOuter ? lhsAttr : rhsAttr;
 
-        FileHandle *fh = new FileHandle{};
+        fh = new FileHandle{};
+        rbfm.openFile((leftIsOuter ? leftPartitions[partitionNum] : rightPartitions[partitionNum]), *fh);
         rbfm.scan(*fh, attrs, "", NO_OP, nullptr, attrNames, scanner);
-        while (scanner.getNextRecord(rid, leftTuple) != RBFM_EOF) {
+
+        while (scanner.getNextRecord(rid, rightTuple) != RBFM_EOF) {
             keyAttrPos = nullptr;
             ptr = start;
 
             for (SizeType i = 0; i < numAttrs; ++i) {
                 if (i % BITS_PER_BYTE == 0)
-                    memmove(&nullByte, leftTuple + i / BITS_PER_BYTE, 1);
+                    memmove(&nullByte, rightTuple + i / BITS_PER_BYTE, 1);
                 bitNum = i % BITS_PER_BYTE + 1;
                 attr = &attrs[i];
                 nullAttr = rbfm.nullBitOn(nullByte, bitNum);
@@ -801,10 +805,10 @@ namespace PeterDB {
             }
 
             if (keyAttrPos) {
-                SizeType neededBytes = OFFSET_BYTES + (ptr - leftTuple);
+                SizeType neededBytes = OFFSET_BYTES + (ptr - rightTuple);
                 unsigned char *tuple = new unsigned char[neededBytes];
-                *reinterpret_cast<SizeType *>(tuple) = ptr - leftTuple;
-                memmove(tuple + OFFSET_BYTES, leftTuple, ptr - leftTuple);
+                *reinterpret_cast<SizeType *>(tuple) = ptr - rightTuple;
+                memmove(tuple + OFFSET_BYTES, rightTuple, ptr - rightTuple);
                 tuplesWereMapped = true;
 
                 switch (keyType) {
@@ -822,11 +826,15 @@ namespace PeterDB {
 
         scanner.close();
         if (tuplesWereMapped) {
-            FileHandle *handle = new FileHandle{};
-            if (leftIsOuter)
-                rbfm.scan(*handle, rightAttrs, "", NO_OP, nullptr, rightAttrNames, scanner);
-            else
-                rbfm.scan(*handle, leftAttrs, "", NO_OP, nullptr, leftAttrNames, scanner);
+            fh = new FileHandle{};
+
+            if (leftIsOuter) {
+                rbfm.openFile(rightPartitions[partitionNum], *fh);
+                rbfm.scan(*fh, rightAttrs, "", NO_OP, nullptr, rightAttrNames, scanner);
+            } else {
+                rbfm.openFile(leftPartitions[partitionNum], *fh);
+                rbfm.scan(*fh, leftAttrs, "", NO_OP, nullptr, leftAttrNames, scanner);
+            }
             return 0;
         }
         return -1;
