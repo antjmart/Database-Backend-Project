@@ -290,10 +290,9 @@ namespace PeterDB {
         std::vector<unsigned char *> *tuplePtr;
         unsigned tupleIndex;
 
-        // byte arrays for storing current left and right tuples
-        unsigned char leftTuple[PAGE_SIZE];
+        // byte arrays for storing current tuple data
         unsigned char rightTuple[PAGE_SIZE];
-        SizeType leftTupleSize, rightTupleSize;
+        SizeType rightTupleSize;
         bool leftIsOuter;
 
         // hash value will be an index into vector, value is file name of the partition
