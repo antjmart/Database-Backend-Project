@@ -753,7 +753,56 @@ namespace PeterDB {
     }
 
     void GHJoin::getMatches() {
+        unsigned char nullByte;
+        int bitNum;
+        SizeType numAttrs = leftIsOuter ? rightAttrs.size() : leftAttrs.size();
+        std::vector<Attribute> & attrs = leftIsOuter ? rightAttrs : leftAttrs;
+        const std::string & keyAttr = leftIsOuter ? rhsAttr : lhsAttr;
+        unsigned char *ptr = rightTuple + rbfm.nullBytesNeeded(numAttrs);
+        unsigned char *keyAttrPos = nullptr;
+        Attribute *attr = nullptr;
+        bool nullAttr;
+        AttrType keyType;
 
+        for (SizeType i = 0; i < numAttrs; ++i) {
+            if (i % BITS_PER_BYTE == 0)
+                memmove(&nullByte, rightTuple + i / BITS_PER_BYTE, 1);
+            bitNum = i % BITS_PER_BYTE + 1;
+            attr = &attrs[i];
+            nullAttr = rbfm.nullBitOn(nullByte, bitNum);
+
+            if (attr->name == keyAttr) {
+                if (nullAttr) return;
+                keyAttrPos = ptr;
+                keyType = attr->type;
+            }
+
+            if (!nullAttr) {
+                if (attr->type == TypeVarChar)
+                    ptr += INT_BYTES + *reinterpret_cast<const int *>(ptr);
+                else
+                    ptr += attr->length;
+            }
+        }
+
+        rightTupleSize = ptr - rightTuple;
+        switch (keyType) {
+            case TypeInt: {
+                int key = *reinterpret_cast<int *>(keyAttrPos);
+                if (intKeys.find(key) != intKeys.end())
+                    tuplePtr = &intKeys[key];
+                break;
+            } case TypeReal: {
+                float key = *reinterpret_cast<float *>(keyAttrPos);
+                if (realKeys.find(key) != realKeys.end())
+                    tuplePtr = &realKeys[key];
+                break;
+            } case TypeVarChar: {
+                const std::string & key = std::string{reinterpret_cast<char *>(keyAttrPos + INT_BYTES), *reinterpret_cast<unsigned *>(keyAttrPos)};
+                if (strKeys.find(key) != strKeys.end())
+                    tuplePtr = &strKeys[key];
+            }
+        }
     }
 
     RC GHJoin::getNextTuple(void *data) {
