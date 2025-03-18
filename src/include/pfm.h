@@ -42,6 +42,7 @@ namespace PeterDB {
         unsigned pageCount;
 
         FileHandle();                                                       // Default constructor
+        FileHandle(const FileHandle & fh);
         ~FileHandle();                                              // Destructor
         FileHandle & operator = (const FileHandle & other);                 // Assigns counters, not open file
 

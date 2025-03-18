@@ -58,6 +58,14 @@ namespace PeterDB {
         pageCount = 0;
     }
 
+    FileHandle::FileHandle(const FileHandle & fh) {
+        // file stream will not be copied, assignment is for copying counters
+        readPageCounter = fh.readPageCounter;
+        writePageCounter = fh.writePageCounter;
+        appendPageCounter = fh.appendPageCounter;
+        pageCount = fh.pageCount;
+    }
+
     FileHandle::~FileHandle() = default;
 
     FileHandle & FileHandle::operator = (const FileHandle & other) {
