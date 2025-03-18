@@ -295,14 +295,17 @@ namespace PeterDB {
         bool leftIsOuter;
 
         // hash value will be an index into vector, value is file name of the partition
+        const unsigned numPartitions;
+        unsigned partitionNum;
+        bool scanningPartition;
         std::vector<std::string> leftPartitions;
         std::vector<std::string> rightPartitions;
         FileHandle *fh;
 
         void clearMemory();
         void joinTuples(void *data);
-        void createPartitions(const unsigned &numPartitions, bool forOuter);
-        RC getMatchingPartition(unsigned &partition, const unsigned &numPartitions, const std::vector<Attribute> &attrs, const std::string &keyAttr);
+        void createPartitions(bool forOuter);
+        RC getMatchingPartition(unsigned &partition, const std::vector<Attribute> &attrs, const std::string &keyAttr);
 
     public:
         GHJoin(Iterator *leftIn,               // Iterator of input R
