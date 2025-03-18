@@ -279,7 +279,9 @@ namespace PeterDB {
         std::string lhsAttr;
         std::string rhsAttr;
         std::vector<Attribute> leftAttrs;
+        std::vector<std::string> leftAttrNames;
         std::vector<Attribute> rightAttrs;
+        std::vector<std::string> rightAttrNames;
 
         // maps used to line up a key to different left tuples for right tuples to be matched with
         std::unordered_map<int, std::vector<unsigned char *>> intKeys;
@@ -306,7 +308,7 @@ namespace PeterDB {
         void joinTuples(void *data);
         void createPartitions(bool forOuter);
         RC getMatchingPartition(unsigned &partition, const std::vector<Attribute> &attrs, const std::string &keyAttr);
-        void processSmallerPartition();
+        RC processSmallerPartition();
         void getMatches();
 
     public:
