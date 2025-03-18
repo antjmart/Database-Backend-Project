@@ -658,7 +658,11 @@ namespace PeterDB {
           partitionNum(0), scanningPartition(false), leftPartitions(numPartitions, ""),
           rightPartitions(numPartitions, ""), fh(nullptr) {
         leftIn->getAttributes(leftAttrs);
+        for (const Attribute & attr : leftAttrs)
+            leftAttrNames.push_back(attr.name);
         rightIn->getAttributes(rightAttrs);
+        for (const Attribute & attr : rightAttrs)
+            rightAttrNames.push_back(attr.name);
         createPartitions(true);
         createPartitions(false);
     }
@@ -748,8 +752,84 @@ namespace PeterDB {
         }
     }
 
-    void GHJoin::processSmallerPartition() {
+    RC GHJoin::processSmallerPartition() {
+        FileHandle fhLeft{}, fhRight{};
+        rbfm.openFile(leftPartitions[partitionNum], fhLeft);
+        rbfm.openFile(rightPartitions[partitionNum], fhRight);
+        leftIsOuter = fhLeft.pageCount <= fhRight.pageCount;
+        rbfm.closeFile(fhLeft);
+        rbfm.closeFile(fhRight);
 
+        unsigned char nullByte;
+        int bitNum;
+        SizeType numAttrs = leftIsOuter ? leftAttrs.size() : rightAttrs.size();
+        unsigned char *start = leftTuple + rbfm.nullBytesNeeded(numAttrs);
+        unsigned char *ptr, *keyAttrPos;
+        Attribute *attr = nullptr;
+        bool nullAttr, tuplesWereMapped = false;
+        AttrType keyType;
+        RID rid{};
+        std::vector<Attribute> & attrs = leftIsOuter ? leftAttrs : rightAttrs;
+        const std::vector<std::string> & attrNames = leftIsOuter ? leftAttrNames : rightAttrNames;
+        const std::string & keyAttr = leftIsOuter ? lhsAttr : rhsAttr;
+
+        FileHandle *fh = new FileHandle{};
+        rbfm.scan(*fh, attrs, "", NO_OP, nullptr, attrNames, scanner);
+        while (scanner.getNextRecord(rid, leftTuple) != RBFM_EOF) {
+            keyAttrPos = nullptr;
+            ptr = start;
+
+            for (SizeType i = 0; i < numAttrs; ++i) {
+                if (i % BITS_PER_BYTE == 0)
+                    memmove(&nullByte, leftTuple + i / BITS_PER_BYTE, 1);
+                bitNum = i % BITS_PER_BYTE + 1;
+                attr = &attrs[i];
+                nullAttr = rbfm.nullBitOn(nullByte, bitNum);
+
+                if (attr->name == keyAttr) {
+                    if (nullAttr) break;
+                    keyAttrPos = ptr;
+                    keyType = attr->type;
+                }
+
+                if (!nullAttr) {
+                    if (attr->type == TypeVarChar)
+                        ptr += INT_BYTES + *reinterpret_cast<const int *>(ptr);
+                    else
+                        ptr += attr->length;
+                }
+            }
+
+            if (keyAttrPos) {
+                SizeType neededBytes = OFFSET_BYTES + (ptr - leftTuple);
+                unsigned char *tuple = new unsigned char[neededBytes];
+                *reinterpret_cast<SizeType *>(tuple) = ptr - leftTuple;
+                memmove(tuple + OFFSET_BYTES, leftTuple, ptr - leftTuple);
+                tuplesWereMapped = true;
+
+                switch (keyType) {
+                    case TypeInt:
+                        intKeys[*reinterpret_cast<int *>(keyAttrPos)].push_back(tuple);
+                        break;
+                    case TypeReal:
+                        realKeys[*reinterpret_cast<float *>(keyAttrPos)].push_back(tuple);
+                        break;
+                    case TypeVarChar:
+                        strKeys[{reinterpret_cast<char *>(keyAttrPos + INT_BYTES), *reinterpret_cast<unsigned *>(keyAttrPos)}].push_back(tuple);
+                }
+            }
+        }
+
+        scanner.close();
+        if (tuplesWereMapped) {
+            FileHandle *handle = new FileHandle{};
+            if (leftIsOuter)
+                rbfm.scan(*handle, rightAttrs, "", NO_OP, nullptr, rightAttrNames, scanner);
+            else
+                rbfm.scan(*handle, leftAttrs, "", NO_OP, nullptr, leftAttrNames, scanner);
+            return 0;
+        }
+        return -1;
     }
 
     void GHJoin::getMatches() {
@@ -814,7 +894,10 @@ namespace PeterDB {
         while (true) {
             if (!scanningPartition) {
                 if (partitionNum >= numPartitions) return QE_EOF;
-                processSmallerPartition();
+                if (processSmallerPartition() == -1) {
+                    ++partitionNum;
+                    continue;
+                }
                 scanningPartition = true;
             }
             RID rid{};
