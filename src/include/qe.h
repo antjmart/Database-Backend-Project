@@ -306,6 +306,8 @@ namespace PeterDB {
         void joinTuples(void *data);
         void createPartitions(bool forOuter);
         RC getMatchingPartition(unsigned &partition, const std::vector<Attribute> &attrs, const std::string &keyAttr);
+        void processSmallerPartition();
+        void getMatches();
 
     public:
         GHJoin(Iterator *leftIn,               // Iterator of input R
