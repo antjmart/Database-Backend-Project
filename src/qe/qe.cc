@@ -578,7 +578,7 @@ namespace PeterDB {
         return 0;
     }
 
-    RC GHJoin::getMatchingPartition(unsigned &partition, const unsigned &numPartitions, const std::vector<Attribute> &attrs, const std::string &keyAttr) {
+    RC GHJoin::getMatchingPartition(unsigned &partition, const std::vector<Attribute> &attrs, const std::string &keyAttr) {
         unsigned char nullByte;
         int bitNum;
         SizeType numAttrs = attrs.size();
@@ -619,7 +619,7 @@ namespace PeterDB {
         return -1;
     }
 
-    void GHJoin::createPartitions(const unsigned &numPartitions, bool forOuter) {
+    void GHJoin::createPartitions(bool forOuter) {
         std::vector<std::string> & partitions = forOuter ? leftPartitions : rightPartitions;
         std::vector<FileHandle> fhandles{numPartitions, FileHandle{}};
         std::string baseFileName = forOuter ? "left" : "right";
@@ -644,7 +644,7 @@ namespace PeterDB {
         unsigned partition;
         RID rid{};
         while (iter.getNextTuple(leftTuple) != QE_EOF) {
-            if (getMatchingPartition(partition, numPartitions, attrs, keyAttr) == 0)
+            if (getMatchingPartition(partition, attrs, keyAttr) == 0)
                 rbfm.insertRecord(fhandles[partition], attrs, leftTuple, rid);
         }
 
@@ -654,12 +654,13 @@ namespace PeterDB {
 
     GHJoin::GHJoin(Iterator *leftIn, Iterator *rightIn, const Condition &condition, const unsigned int numPartitions)
         : rbfm(RecordBasedFileManager::instance()), left(*leftIn), right(*rightIn), lhsAttr(condition.lhsAttr),
-          rhsAttr(condition.rhsAttr), tuplePtr(nullptr), tupleIndex(0), leftPartitions(numPartitions, ""),
+          rhsAttr(condition.rhsAttr), tuplePtr(nullptr), tupleIndex(0), numPartitions(numPartitions),
+          partitionNum(0), scanningPartition(false), leftPartitions(numPartitions, ""),
           rightPartitions(numPartitions, ""), fh(nullptr) {
         leftIn->getAttributes(leftAttrs);
         rightIn->getAttributes(rightAttrs);
-        createPartitions(numPartitions, true);
-        createPartitions(numPartitions, false);
+        createPartitions(true);
+        createPartitions(false);
     }
 
     GHJoin::~GHJoin() {
